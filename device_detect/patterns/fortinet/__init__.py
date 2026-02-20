@@ -1,0 +1,1 @@
+"""Fortinet device detection patterns."""

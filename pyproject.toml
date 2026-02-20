@@ -1,0 +1,81 @@
+[build-system]
+requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "device-detect"
+version = "0.7.0"
+description = "Automatic network device type detection using SNMP and SSH"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Mohamed RABAH", email = "mdrbh0@gmail.com"}
+]
+keywords = ["network", "device", "detection", "snmp", "ssh", "cisco", "aruba", "hp", "oneaccess"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: Telecommunications Industry",
+    "Topic :: System :: Networking",
+    "Topic :: System :: Networking :: Monitoring",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "netmiko>=4.0.0",
+    "puresnmp[crypto]>=2.0.0",
+    "paramiko>=2.7.0",
+    "netutils>=1.0.0",
+    "click>=8.0.0",
+    "rich>=12.0.0",
+    "tabulate>=0.9.0",
+    "pyyaml>=6.0.0",
+    "pandas>=2.0.0",
+    "openpyxl>=3.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=3.0.0",
+    "black>=22.0.0",
+    "flake8>=4.0.0",
+    "mypy>=0.950",
+]
+
+[project.scripts]
+device-detect = "device_detect.cli.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/mdrbh/device-detect"
+Documentation = "https://github.com/mdrbh/device-detect/blob/main/README.md"
+Repository = "https://github.com/mdrbh/device-detect"
+"Bug Tracker" = "https://github.com/mdrbh/device-detect/issues"
+
+[tool.setuptools]
+packages = ["device_detect"]
+
+[tool.setuptools.package-data]
+device_detect = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false

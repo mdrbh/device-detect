@@ -1,0 +1,1 @@
+"""Cisco device patterns."""

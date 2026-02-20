@@ -1,0 +1,1 @@
+"""OneAccess device patterns."""
