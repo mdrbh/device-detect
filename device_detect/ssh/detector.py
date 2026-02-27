@@ -540,13 +540,15 @@ class SSHDetector:
         return self.collector.collect_additional_commands(commands, sanitize=sanitize)
     
     def get_ssh_data(self, detection_commands: Optional[Dict[str, str]] = None, 
-                     additional_commands: Optional[Dict[str, str]] = None):
+                     additional_commands: Optional[Dict[str, str]] = None,
+                     include_banners: bool = True):
         """
         Get collected SSH data.
         
         Args:
             detection_commands: Optional dict of detection command outputs
             additional_commands: Optional dict of additional command outputs
+            include_banners: If False, exclude banner fields from result (default: True)
         
         Returns:
             SSHData object with all banner fields, prompt, and command outputs
@@ -558,7 +560,8 @@ class SSHDetector:
             banner_motd=self.banner_motd,
             prompt=self.prompt,
             detection_commands=detection_commands,
-            additional_commands=additional_commands
+            additional_commands=additional_commands,
+            include_banners=include_banners
         )
     
     def disconnect(self) -> None:

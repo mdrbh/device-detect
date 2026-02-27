@@ -63,6 +63,8 @@ class DeviceDetect:
         # Detection options
         enable_snmp: bool = True,
         ssh_verification: bool = False,
+        # Banner options
+        include_banners: Optional[bool] = None,
         # Logging
         log_level: str = DEFAULT_LOG_LEVEL,
     ) -> None:
@@ -118,6 +120,9 @@ class DeviceDetect:
         # Detection options
         self.enable_snmp = enable_snmp
         self.ssh_verification = ssh_verification
+        
+        # Banner options
+        self.include_banners = include_banners
         
         # Results tracking
         self.snmp_result: Optional[str] = None
@@ -504,8 +509,11 @@ class DeviceDetect:
             detector = SSHDetector(**ssh_params)
             verified, _ = detector.verify_device_type(device_type)
             
+            # Determine banner inclusion: use self.include_banners if set, otherwise default to False for detect mode
+            include_banners = self.include_banners if self.include_banners is not None else False
+            
             # Collect SSH data
-            ssh_data = detector.get_ssh_data()
+            ssh_data = detector.get_ssh_data(include_banners=include_banners)
             
             return verified, ssh_data
             
@@ -563,10 +571,19 @@ class DeviceDetect:
             if additional_commands:
                 additional_cmd_outputs = detector.collect_additional_commands(additional_commands, sanitize=sanitize_commands)
             
+            # Determine banner inclusion based on operation mode
+            # If include_banners is explicitly set, use that value
+            # Otherwise: True for collect mode (detect_device_type=False), False for detect mode
+            if self.include_banners is not None:
+                include_banners = self.include_banners
+            else:
+                include_banners = not detect_device_type  # True for collect, False for detect
+            
             # Collect SSH data with command outputs
             ssh_data = detector.get_ssh_data(
                 detection_commands=detection_cmd_outputs,
-                additional_commands=additional_cmd_outputs
+                additional_commands=additional_cmd_outputs,
+                include_banners=include_banners
             )
             
             return device_type, ssh_data

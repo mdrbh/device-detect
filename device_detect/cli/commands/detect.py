@@ -34,6 +34,7 @@ console = Console()
 @click.option('--ssh-port', type=int, help='SSH port')
 @click.option('--ssh-timing-profile', type=click.Choice(['fast', 'normal', 'slow']), help='SSH timing profile')
 @click.option('--ssh-verification', is_flag=True, help='Verify SNMP detection via SSH')
+@click.option('--include-banners', is_flag=True, help='Include SSH banners in detection result (default: False)')
 @click.option('--output', type=click.Choice(['json', 'yaml', 'table', 'csv', 'excel']), help='Output format')
 @click.option('--output-file', type=click.Path(), help='Output file path')
 @click.option('--csv-delimiter', help='CSV delimiter character')
@@ -42,7 +43,7 @@ console = Console()
 @click.pass_context
 def detect(ctx, host, config, offline, input_file, input_dir, snmp_community, snmp_version, snmp_user, snmp_auth_proto, snmp_auth_password,
            snmp_priv_proto, snmp_priv_password, ssh_username, ssh_password, ssh_enable_password,
-           ssh_port, ssh_timing_profile, ssh_verification, output, output_file, csv_delimiter, max_workers, sequential):
+           ssh_port, ssh_timing_profile, ssh_verification, include_banners, output, output_file, csv_delimiter, max_workers, sequential):
     """Detect device type(s) using SNMP and/or SSH, or from collected JSON data (offline mode). Multi-device detection runs in parallel by default."""
     
     # Get log_level from context
@@ -67,7 +68,7 @@ def detect(ctx, host, config, offline, input_file, input_dir, snmp_community, sn
     # Apply override logic for all settings (Click stores params with underscores)
     snmp_version = get_value(snmp_version, 'snmp_version', 'snmp_version', 2)
     ssh_port = get_value(ssh_port, 'ssh_port', 'ssh_port', 22)
-    ssh_timing_profile = get_value(ssh_timing_profile, 'ssh_timing_profile', 'ssh_timing_profile', 'normal')
+    ssh_timing_profile = get_value(ssh_timing_profile, 'ssh_timing_profile', 'ssh_timing_profile', 'fast')
     output = get_value(output, 'output', 'output_format', 'table')
     output_file = get_value(output_file, 'output_file', 'output_file', None)
     csv_delimiter = get_value(csv_delimiter, 'csv_delimiter', 'csv_delimiter', ';')
@@ -189,6 +190,7 @@ def detect(ctx, host, config, offline, input_file, input_dir, snmp_community, sn
                     hostname=hostname, 
                     log_level=log_level, 
                     ssh_verification=ssh_verification,
+                    include_banners=include_banners if include_banners else None,
                     **snmp_creds, 
                     **ssh_creds
                 )
@@ -225,6 +227,7 @@ def detect(ctx, host, config, offline, input_file, input_dir, snmp_community, sn
                 ssh_port=ssh_port,
                 ssh_timing_profile=ssh_timing_profile,
                 ssh_verification=ssh_verification,
+                include_banners=include_banners if include_banners else None,
                 log_level=log_level
             )
             result = detector.detect()

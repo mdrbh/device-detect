@@ -151,7 +151,8 @@ class SSHCollector:
         banner_motd: Optional[str],
         prompt: Optional[str],
         detection_commands: Optional[Dict[str, str]] = None,
-        additional_commands: Optional[Dict[str, str]] = None
+        additional_commands: Optional[Dict[str, str]] = None,
+        include_banners: bool = True
     ) -> SSHData:
         """
         Get collected SSH data.
@@ -164,15 +165,21 @@ class SSHCollector:
             prompt: Device prompt
             detection_commands: Optional dict of detection command outputs
             additional_commands: Optional dict of additional command outputs
+            include_banners: If False, exclude banner fields from result (default: True)
         
         Returns:
             SSHData object with all banner fields, prompt, and command outputs
         """
+        # Conditionally include banners based on flag
+        final_banner = banner if include_banners else None
+        final_banner_auth = banner_auth if include_banners else None
+        final_banner_motd = banner_motd if include_banners else None
+        
         return SSHData(
             ssh_version=ssh_version,
-            banner=banner,
-            banner_auth=banner_auth,
-            banner_motd=banner_motd,
+            banner=final_banner,
+            banner_auth=final_banner_auth,
+            banner_motd=final_banner_motd,
             prompt=prompt,
             detection_commands=detection_commands,
             additional_commands=additional_commands

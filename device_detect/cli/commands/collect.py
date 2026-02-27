@@ -43,11 +43,12 @@ console = Console()
 @click.option('--collect-ssh-commands', is_flag=True, help='Collect all SSH detection commands outputs')
 @click.option('--additional-commands', help='Comma-separated list of additional commands to collect (deduplicated against detection commands)')
 @click.option('--sanitize', is_flag=True, help='Remove escape characters and control codes from command outputs')
+@click.option('--no-banners', is_flag=True, help='Exclude SSH banners from collection result (default: False, banners included)')
 @click.pass_context
 def collect(ctx, host, config, snmp_community, snmp_version, snmp_user, snmp_auth_proto, snmp_auth_password,
            snmp_priv_proto, snmp_priv_password, ssh_username, ssh_password, ssh_enable_password,
            ssh_port, ssh_timing_profile, snmp_only, ssh_only, output, output_file, output_dir, csv_delimiter, 
-           max_workers, sequential, collect_ssh_commands, additional_commands, sanitize):
+           max_workers, sequential, collect_ssh_commands, additional_commands, sanitize, no_banners):
     """Collect raw device data (SNMP/SSH) without device type detection. Multi-device collection runs in parallel by default."""
     
     # Get log_level from context
@@ -72,7 +73,7 @@ def collect(ctx, host, config, snmp_community, snmp_version, snmp_user, snmp_aut
     # Apply override logic for all settings (Click stores params with underscores)
     snmp_version = get_value(snmp_version, 'snmp_version', 'snmp_version', 2)
     ssh_port = get_value(ssh_port, 'ssh_port', 'ssh_port', 22)
-    ssh_timing_profile = get_value(ssh_timing_profile, 'ssh_timing_profile', 'ssh_timing_profile', 'normal')
+    ssh_timing_profile = get_value(ssh_timing_profile, 'ssh_timing_profile', 'ssh_timing_profile', 'fast')
     output = get_value(output, 'output', 'output_format', 'json')
     output_file = get_value(output_file, 'output_file', 'output_file', None)
     output_dir = get_value(output_dir, 'output_dir', 'output_dir', None)
@@ -157,7 +158,13 @@ def collect(ctx, host, config, snmp_community, snmp_version, snmp_user, snmp_aut
             
             # Define collection function for parallel processing
             def collect_device(hostname):
-                detector = DeviceDetect(hostname=hostname, log_level=log_level, **snmp_creds, **ssh_creds)
+                detector = DeviceDetect(
+                    hostname=hostname, 
+                    log_level=log_level,
+                    include_banners=False if no_banners else None,
+                    **snmp_creds, 
+                    **ssh_creds
+                )
                 return detector.collect(
                     snmp_only=snmp_only, 
                     ssh_only=ssh_only,
@@ -196,6 +203,7 @@ def collect(ctx, host, config, snmp_community, snmp_version, snmp_user, snmp_aut
                 ssh_enable_password=ssh_enable_password,
                 ssh_port=ssh_port,
                 ssh_timing_profile=ssh_timing_profile,
+                include_banners=False if no_banners else None,
                 log_level=log_level
             )
             result = detector.collect(
