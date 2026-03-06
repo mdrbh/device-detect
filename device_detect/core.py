@@ -11,17 +11,24 @@ from typing import Optional, List, Dict, Any
 from device_detect.snmp.detector import SNMPDetector
 from device_detect.ssh.detector import SSHDetector
 from device_detect.exceptions import DeviceDetectError
-from device_detect.utils import validate_hostname, setup_logging
+from device_detect.utils import setup_logging
 from device_detect.constants import DEFAULT_LOG_LEVEL
-from device_detect.models import DetectionResult, SNMPData, SSHData, TimingData, MethodResult
-from device_detect.offline import (
+from device_detect.models import DetectionResult, SNMPData, SSHData, MethodResult
+from device_detect.error_mapping import map_exception_to_error
+from device_detect.utils import validate_hostname
+from device_detect.validation import validate_config
+from device_detect.result_builder import build_detection_result, build_collection_result
+from device_detect.operations import DetectionOperation, CollectionOperation
+from device_detect.operations.offline import (
+    detect_offline, 
+    detect_offline_from_dict,
     load_collected_data,
     detect_from_snmp_data,
     detect_from_ssh_data,
     calculate_offline_score
 )
 from device_detect.mapper import get_framework_drivers
-from device_detect.error_mapping import map_exception_to_error
+from device_detect.models import TimingData
 
 logger = logging.getLogger(__name__)
 
@@ -277,156 +284,33 @@ class DeviceDetect:
         Returns:
             DetectionResult object with all collected data and timing information
         """
-        logger.info(f"Starting device detection for {self.hostname}")
-        
-        # Track timing
         start_time = datetime.now()
-        phase_timings = {}
         
-        # Track ALL errors from both methods
-        all_errors = []
+        # Execute detection using DetectionOperation
+        operation = DetectionOperation(self)
+        final_result, snmp_result, ssh_result, all_errors, phase_timings = operation.execute()
         
-        # Phase 1: SNMP Detection
-        if self.enable_snmp and self._has_snmp_credentials():
-            logger.info("Phase 1: Attempting SNMP detection")
-            phase_start = time.time()
-            snmp_result = self._try_snmp_detection()
-            phase_timings["snmp_detect"] = time.time() - phase_start
-            
-            if snmp_result.success:
-                self.snmp_result = snmp_result.device_type
-                self.snmp_data = snmp_result.snmp_data
-                logger.info(f"SNMP detected: {self.snmp_result}")
-            else:
-                # Store error with context
-                all_errors.append({
-                    "method": "snmp",
-                    "error": snmp_result.error,
-                    "error_type": snmp_result.error_type,
-                    "error_details": snmp_result.error_details
-                })
-                logger.warning(f"SNMP detection failed: {snmp_result.error}")
-                self.warnings.append(f"SNMP detection failed: {snmp_result.error}")
+        # Update instance state
+        self.final_result = final_result
+        self.snmp_result = snmp_result
+        self.ssh_result = ssh_result
         
-        # Phase 2: SSH Verification or Detection
-        if self._has_ssh_credentials():
-            # If SNMP detected and ssh_verification enabled, verify SNMP result via SSH
-            if self.snmp_result and self.ssh_verification:
-                logger.info(f"Phase 2: Attempting SSH verification of SNMP result ({self.snmp_result})")
-                ssh_phase_start = time.time()
-                self.ssh_verification_attempted = True
-                
-                verify_result = self._try_ssh_verification(self.snmp_result)
-                ssh_elapsed = time.time() - ssh_phase_start
-                phase_timings["ssh_verify"] = ssh_elapsed
-                
-                if verify_result.success and verify_result.device_type:
-                    logger.info(f"SSH verification succeeded for {self.snmp_result}")
-                    self.ssh_verification_success = True
-                    self.ssh_result = self.snmp_result
-                    self.ssh_data = verify_result.ssh_data
-                else:
-                    logger.warning(f"SSH verification failed for {self.snmp_result}, falling back to full SSH detection")
-                    self.ssh_verification_success = False
-                    self.verification_notes = f"SSH verification failed for SNMP-detected {self.snmp_result}, performed full SSH autodetection"
-                    self.warnings.append(f"SSH verification failed for {self.snmp_result}: {verify_result.error}")
-                    
-                    # Fall back to full SSH detection
-                    fallback_start = time.time()
-                    ssh_result = self._try_ssh_detection()
-                    phase_timings["ssh_detect"] = time.time() - fallback_start
-                    
-                    if ssh_result.success:
-                        self.ssh_result = ssh_result.device_type
-                        self.ssh_data = ssh_result.ssh_data
-                        logger.info(f"SSH fallback detected: {self.ssh_result}")
-            else:
-                # Normal SSH detection (no verification)
-                logger.info("Phase 2: Attempting SSH detection")
-                ssh_phase_start = time.time()
-                ssh_result = self._try_ssh_detection()
-                ssh_elapsed = time.time() - ssh_phase_start
-                phase_timings["ssh_connect"] = ssh_elapsed * 0.3  # Estimate
-                phase_timings["ssh_detect"] = ssh_elapsed * 0.7   # Estimate
-                
-                if ssh_result.success:
-                    self.ssh_result = ssh_result.device_type
-                    self.ssh_data = ssh_result.ssh_data
-                    logger.info(f"SSH detected: {self.ssh_result}")
-                else:
-                    # Store error with context
-                    all_errors.append({
-                        "method": "ssh",
-                        "error": ssh_result.error,
-                        "error_type": ssh_result.error_type,
-                        "error_details": ssh_result.error_details
-                    })
-                    logger.warning(f"SSH detection failed: {ssh_result.error}")
-                    self.warnings.append(f"SSH detection failed: {ssh_result.error}")
-        
-        # Determine final result
-        if self.snmp_result and self.ssh_result:
-            if self.snmp_result == self.ssh_result:
-                logger.info("SNMP and SSH agree on device type")
-                self.final_result = self.snmp_result
-            else:
-                logger.warning(f"Detection conflict: SNMP={self.snmp_result}, SSH={self.ssh_result}")
-                self.warnings.append(f"Detection conflict: SNMP detected '{self.snmp_result}' but SSH detected '{self.ssh_result}' - using SSH result")
-                # Prefer SSH result as it's more detailed
-                self.final_result = self.ssh_result
-        elif self.snmp_result:
-            self.final_result = self.snmp_result
-        elif self.ssh_result:
-            self.final_result = self.ssh_result
-        
-        # Calculate timing
-        end_time = datetime.now()
-        total_seconds = (end_time - start_time).total_seconds()
-        
-        # Calculate score
-        score = self._calculate_score()
-        
-        # Determine detection method
-        method = self._determine_method()
-        
-        # Select primary error based on severity/actionability
-        primary_error = self._select_primary_error(all_errors) if all_errors else None
-        
-        # Determine overall success
-        success = self.final_result is not None
-        if not success:
-            logger.warning("Device detection failed - no match found")
-        
-        # Get framework driver mappings if device_type was detected
-        framework_mappings = self._get_framework_mappings(self.final_result)
-        
-        result = DetectionResult(
+        # Build and return result
+        return build_detection_result(
             hostname=self.hostname,
-            operation_mode="detect",
-            method=method,
-            success=success,
-            device_type=self.final_result,
-            score=score,
+            final_result=final_result,
+            snmp_result=snmp_result,
+            ssh_result=ssh_result,
             snmp_data=self.snmp_data,
             ssh_data=self.ssh_data,
-            timing=TimingData(
-                total_seconds=total_seconds,
-                phase_timings=phase_timings
-            ),
             ssh_verification_attempted=self.ssh_verification_attempted,
             ssh_verification_success=self.ssh_verification_success,
             verification_notes=self.verification_notes,
-            # Populate error fields from primary error
-            error=primary_error["error"] if primary_error else None,
-            error_type=primary_error["error_type"] if primary_error else None,
-            error_details=primary_error["error_details"] if primary_error else None,
-            # Include all errors for debugging
-            all_errors=all_errors if all_errors else None,
-            warnings=self.warnings if self.warnings else None,
-            **framework_mappings
+            warnings=self.warnings,
+            all_errors=all_errors,
+            start_time=start_time,
+            phase_timings=phase_timings
         )
-        
-        return result
     
     @staticmethod
     def detect_offline_from_dict(data: dict) -> DetectionResult:
@@ -554,96 +438,28 @@ class DeviceDetect:
         Returns:
             DetectionResult object with collected data (no device_type or confidence)
         """
-        logger.info(f"Starting data collection for {self.hostname}")
-        
-        # Track timing
         start_time = datetime.now()
-        phase_timings = {}
         
-        # Track ALL errors from both methods
-        all_errors = []
-        
-        # Collect SNMP data (without device type detection)
-        if not ssh_only and self._has_snmp_credentials():
-            logger.info("Collecting SNMP data")
-            phase_start = time.time()
-            snmp_result = self._try_snmp_detection(detect_device_type=False)
-            phase_timings["snmp_collect"] = time.time() - phase_start
-            if snmp_result.success:
-                self.snmp_data = snmp_result.snmp_data
-            else:
-                # Store error with context
-                all_errors.append({
-                    "method": "snmp",
-                    "error": snmp_result.error,
-                    "error_type": snmp_result.error_type,
-                    "error_details": snmp_result.error_details
-                })
-                logger.warning(f"SNMP collection failed: {snmp_result.error}")
-                self.warnings.append(f"SNMP collection failed: {snmp_result.error}")
-        
-        # Collect SSH data (without device type detection)
-        if not snmp_only and self._has_ssh_credentials():
-            logger.info("Collecting SSH data")
-            phase_start = time.time()
-            ssh_result = self._try_ssh_detection(
-                detect_device_type=False,
-                collect_ssh_commands=collect_ssh_commands,
-                additional_commands=additional_commands,
-                sanitize_commands=sanitize_output
-            )
-            phase_timings["ssh_collect"] = time.time() - phase_start
-            if ssh_result.success:
-                self.ssh_data = ssh_result.ssh_data
-            else:
-                # Store error with context
-                all_errors.append({
-                    "method": "ssh",
-                    "error": ssh_result.error,
-                    "error_type": ssh_result.error_type,
-                    "error_details": ssh_result.error_details
-                })
-                logger.warning(f"SSH collection failed: {ssh_result.error}")
-                self.warnings.append(f"SSH collection failed: {ssh_result.error}")
-        
-        # Calculate timing
-        end_time = datetime.now()
-        total_seconds = (end_time - start_time).total_seconds()
-        
-        # Determine success (if we collected any data)
-        success = self.snmp_data is not None or self.ssh_data is not None
-        
-        # Determine collection method
-        method = self._determine_method()
-        
-        # Select primary error based on severity/actionability
-        primary_error = self._select_primary_error(all_errors) if all_errors else None
-        
-        # Build result
-        result = DetectionResult(
-            hostname=self.hostname,
-            operation_mode="collect",
-            method=method,
-            success=success,
-            device_type=None,  # No detection in collection mode
-            score=0,  # No score in collection mode
-            snmp_data=self.snmp_data,
-            ssh_data=self.ssh_data,
-            timing=TimingData(
-                total_seconds=total_seconds,
-                phase_timings=phase_timings
-            ),
-            # Populate error fields from primary error
-            error=primary_error["error"] if primary_error else None,
-            error_type=primary_error["error_type"] if primary_error else None,
-            error_details=primary_error["error_details"] if primary_error else None,
-            # Include all errors for debugging
-            all_errors=all_errors if all_errors else None,
-            warnings=self.warnings if self.warnings else None
+        # Execute collection using CollectionOperation
+        operation = CollectionOperation(self)
+        all_errors, phase_timings = operation.execute(
+            snmp_only=snmp_only,
+            ssh_only=ssh_only,
+            collect_ssh_commands=collect_ssh_commands,
+            additional_commands=additional_commands,
+            sanitize_output=sanitize_output
         )
         
-        logger.info(f"Data collection completed for {self.hostname}")
-        return result
+        # Build and return result
+        return build_collection_result(
+            hostname=self.hostname,
+            snmp_data=self.snmp_data,
+            ssh_data=self.ssh_data,
+            warnings=self.warnings,
+            all_errors=all_errors,
+            start_time=start_time,
+            phase_timings=phase_timings
+        )
     
     def _has_snmp_credentials(self) -> bool:
         """Check if SNMP credentials are available."""

@@ -8,11 +8,113 @@ import logging
 import re
 from typing import Optional, Dict, Tuple
 from pathlib import Path
+from datetime import datetime
 
-from device_detect.models import SNMPData, SSHData, DetectionResult
+from device_detect.models import SNMPData, SSHData, DetectionResult, TimingData
 from device_detect.patterns import SNMP_MAPPER_DICT, SSH_MAPPER_DICT, DEVICE_TYPE_ALIASES
+from device_detect.mapper import get_framework_drivers
 
 logger = logging.getLogger(__name__)
+
+
+def detect_offline(json_file_path: str) -> DetectionResult:
+    """
+    Perform offline detection from a JSON file.
+    
+    Args:
+        json_file_path: Path to JSON file with collected data
+        
+    Returns:
+        DetectionResult with offline detection results
+    """
+    data = load_collected_data(json_file_path)
+    return detect_offline_from_dict(data)
+
+
+def detect_offline_from_dict(data: dict) -> DetectionResult:
+    """
+    Perform offline detection from a data dictionary.
+    
+    Args:
+        data: Dictionary containing collected SNMP/SSH data
+        
+    Returns:
+        DetectionResult with offline detection results
+    """
+    start_time = datetime.now()
+    hostname = data.get('hostname', 'unknown')
+    
+    # Parse SNMP data if present
+    snmp_data = None
+    snmp_data_dict = data.get('snmp_data')
+    if snmp_data_dict:
+        snmp_data = SNMPData(**snmp_data_dict)
+    
+    # Parse SSH data if present
+    ssh_data = None
+    ssh_data_dict = data.get('ssh_data')
+    if ssh_data_dict:
+        ssh_data = SSHData(**ssh_data_dict)
+    
+    # Perform pattern matching
+    snmp_result, snmp_matches = detect_from_snmp_data(snmp_data)
+    ssh_result, ssh_matches = detect_from_ssh_data(ssh_data)
+    
+    # Determine final result
+    final_result = None
+    method = None
+    
+    if snmp_result and ssh_result:
+        method = "SNMP+SSH"
+        if snmp_result == ssh_result:
+            final_result = snmp_result
+        else:
+            # Prefer SSH result when there's a mismatch
+            final_result = ssh_result
+    elif ssh_result:
+        method = "SSH"
+        final_result = ssh_result
+    elif snmp_result:
+        method = "SNMP"
+        final_result = snmp_result
+    
+    # Calculate score
+    score = calculate_offline_score(
+        snmp_match=snmp_result is not None,
+        ssh_match=ssh_result is not None,
+        matches_agree=(snmp_result == ssh_result if snmp_result and ssh_result else False)
+    )
+    
+    # Get framework mappings
+    framework_mappings = {}
+    if final_result:
+        mappings = get_framework_drivers(final_result)
+        framework_mappings = {
+            'scrapli_driver': mappings.get('scrapli'),
+            'napalm_driver': mappings.get('napalm'),
+            'nornir_driver': mappings.get('nornir'),
+            'ansible_driver': mappings.get('ansible')
+        }
+    
+    # Calculate timing
+    end_time = datetime.now()
+    total_seconds = (end_time - start_time).total_seconds()
+    
+    return DetectionResult(
+        hostname=hostname,
+        operation_mode="offline",
+        method=method,
+        success=final_result is not None,
+        device_type=final_result,
+        score=score,
+        snmp_data=snmp_data,
+        ssh_data=ssh_data,
+        timing=TimingData(
+            total_seconds=total_seconds,
+            phase_timings={}
+        ),
+        **framework_mappings
+    )
 
 
 def load_collected_data(json_file_path: str) -> dict:

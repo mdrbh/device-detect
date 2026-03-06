@@ -20,8 +20,16 @@ from device_detect.exceptions import (
     AuthenticationError,
     ConnectionError,
 )
+from device_detect.operations.offline import (
+    detect_offline,
+    detect_offline_from_dict,
+    load_collected_data,
+    detect_from_snmp_data,
+    detect_from_ssh_data,
+    calculate_offline_score
+)
 
-__version__ = "0.9.3"
+__version__ = "0.10.0"
 __all__ = [
     "DeviceDetect",
     "DetectionResult",
@@ -34,4 +42,10 @@ __all__ = [
     "TimeoutError",
     "AuthenticationError",
     "ConnectionError",
+    "detect_offline",
+    "detect_offline_from_dict",
+    "load_collected_data",
+    "detect_from_snmp_data",
+    "detect_from_ssh_data",
+    "calculate_offline_score",
 ]
