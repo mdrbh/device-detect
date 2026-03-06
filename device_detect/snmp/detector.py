@@ -166,6 +166,7 @@ class SNMPDetector:
                     auth_password=self.auth_password,
                     priv_proto=self.priv_proto,
                     priv_password=self.priv_password,
+                    timeout=self.timeout,
                 )
             )
             return result
@@ -196,6 +197,7 @@ class SNMPDetector:
                     auth_password=self.auth_password,
                     priv_proto=self.priv_proto,
                     priv_password=self.priv_password,
+                    timeout=self.timeout,
                 )
             )
             

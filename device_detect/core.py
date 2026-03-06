@@ -6,14 +6,14 @@ Coordinates SNMP and SSH detection with configurable options.
 import logging
 import time
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List, Dict, Any
 
 from device_detect.snmp.detector import SNMPDetector
 from device_detect.ssh.detector import SSHDetector
 from device_detect.exceptions import DeviceDetectError
 from device_detect.utils import validate_hostname, setup_logging
 from device_detect.constants import DEFAULT_LOG_LEVEL
-from device_detect.models import DetectionResult, SNMPData, SSHData, TimingData
+from device_detect.models import DetectionResult, SNMPData, SSHData, TimingData, MethodResult
 from device_detect.offline import (
     load_collected_data,
     detect_from_snmp_data,
@@ -21,6 +21,7 @@ from device_detect.offline import (
     calculate_offline_score
 )
 from device_detect.mapper import get_framework_drivers
+from device_detect.error_mapping import map_exception_to_error
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,138 @@ class DeviceDetect:
         3. Fall back to SSH detection if SNMP fails
         4. Return best match device_type or None
     """
+    
+    @classmethod
+    def create(
+        cls,
+        hostname: str,
+        # SNMP parameters
+        snmp_community: Optional[str] = None,
+        snmp_version: int = 2,
+        snmp_user: Optional[str] = None,
+        snmp_auth_proto: Optional[str] = None,
+        snmp_auth_password: Optional[str] = None,
+        snmp_priv_proto: Optional[str] = None,
+        snmp_priv_password: Optional[str] = None,
+        # SSH parameters
+        ssh_username: Optional[str] = None,
+        ssh_password: Optional[str] = None,
+        ssh_enable_password: Optional[str] = None,
+        ssh_port: int = 22,
+        # SSH version filtering options
+        ssh_version_filter: bool = True,
+        ssh_version_fallback: bool = True,
+        # SSH timing options
+        ssh_timing_profile: str = "normal",
+        # Detection options
+        enable_snmp: bool = True,
+        ssh_verification: bool = False,
+        # Banner options
+        include_banners: Optional[bool] = None,
+        # Logging
+        log_level: str = DEFAULT_LOG_LEVEL,
+    ):
+        """
+        Factory method to create DeviceDetect instance with validation.
+        
+        Returns DeviceDetect instance if validation succeeds, or DetectionResult
+        with error information if validation fails. This prevents exceptions during
+        initialization.
+        
+        Args:
+            hostname: Target device IP or hostname
+            snmp_community: SNMP community string (v1/v2c)
+            snmp_version: SNMP version (1, 2, or 3)
+            snmp_user: SNMPv3 username
+            snmp_auth_proto: SNMPv3 auth protocol
+            snmp_auth_password: SNMPv3 auth password
+            snmp_priv_proto: SNMPv3 privacy protocol
+            snmp_priv_password: SNMPv3 privacy password
+            ssh_username: SSH username
+            ssh_password: SSH password
+            ssh_enable_password: SSH enable password for privileged mode
+            ssh_port: SSH port (default 22)
+            ssh_version_filter: Enable SSH version filtering (default: True)
+            ssh_version_fallback: Test non-matching device types if no match (default: True)
+            enable_snmp: Enable SNMP detection phase
+            ssh_verification: Verify SNMP results via SSH
+            log_level: Logging level
+            
+        Returns:
+            DeviceDetect instance if successful, DetectionResult with error if validation fails
+        """
+        # Validate hostname
+        if not validate_hostname(hostname):
+            return DetectionResult(
+                hostname=hostname,
+                operation_mode="detect",
+                method=None,
+                success=False,
+                device_type=None,
+                score=0,
+                error=f"Invalid hostname: {hostname}",
+                error_type="ConfigurationError",
+                error_details={"hostname": hostname, "reason": "Hostname validation failed"}
+            )
+        
+        # Validate credentials - at least one method must be available
+        has_snmp = (snmp_version in [1, 2] and snmp_community) or (snmp_version == 3 and snmp_user)
+        has_ssh = ssh_username and ssh_password
+        
+        if not has_snmp and not has_ssh:
+            return DetectionResult(
+                hostname=hostname,
+                operation_mode="detect",
+                method=None,
+                success=False,
+                device_type=None,
+                score=0,
+                error="No valid credentials provided - need either SNMP or SSH credentials",
+                error_type="ConfigurationError",
+                error_details={
+                    "snmp_available": has_snmp,
+                    "ssh_available": has_ssh,
+                    "reason": "At least one detection method (SNMP or SSH) must have valid credentials"
+                }
+            )
+        
+        # All validations passed - create instance
+        try:
+            return cls(
+                hostname=hostname,
+                snmp_community=snmp_community,
+                snmp_version=snmp_version,
+                snmp_user=snmp_user,
+                snmp_auth_proto=snmp_auth_proto,
+                snmp_auth_password=snmp_auth_password,
+                snmp_priv_proto=snmp_priv_proto,
+                snmp_priv_password=snmp_priv_password,
+                ssh_username=ssh_username,
+                ssh_password=ssh_password,
+                ssh_enable_password=ssh_enable_password,
+                ssh_port=ssh_port,
+                ssh_version_filter=ssh_version_filter,
+                ssh_version_fallback=ssh_version_fallback,
+                ssh_timing_profile=ssh_timing_profile,
+                enable_snmp=enable_snmp,
+                ssh_verification=ssh_verification,
+                include_banners=include_banners,
+                log_level=log_level,
+            )
+        except Exception as e:
+            # Catch any unexpected initialization errors
+            error_msg, error_type, error_details = map_exception_to_error(e)
+            return DetectionResult(
+                hostname=hostname,
+                operation_mode="detect",
+                method=None,
+                success=False,
+                device_type=None,
+                score=0,
+                error=error_msg,
+                error_type=error_type,
+                error_details=error_details
+            )
     
     def __init__(
         self,
@@ -133,6 +266,7 @@ class DeviceDetect:
         self.ssh_verification_attempted: bool = False
         self.ssh_verification_success: Optional[bool] = None
         self.verification_notes: Optional[str] = None
+        self.warnings: List[str] = []
         
         logger.info(f"DeviceDetect initialized for {hostname}")
     
@@ -149,15 +283,30 @@ class DeviceDetect:
         start_time = datetime.now()
         phase_timings = {}
         
+        # Track ALL errors from both methods
+        all_errors = []
+        
         # Phase 1: SNMP Detection
         if self.enable_snmp and self._has_snmp_credentials():
             logger.info("Phase 1: Attempting SNMP detection")
             phase_start = time.time()
-            self.snmp_result, self.snmp_data = self._try_snmp_detection()
+            snmp_result = self._try_snmp_detection()
             phase_timings["snmp_detect"] = time.time() - phase_start
             
-            if self.snmp_result:
+            if snmp_result.success:
+                self.snmp_result = snmp_result.device_type
+                self.snmp_data = snmp_result.snmp_data
                 logger.info(f"SNMP detected: {self.snmp_result}")
+            else:
+                # Store error with context
+                all_errors.append({
+                    "method": "snmp",
+                    "error": snmp_result.error,
+                    "error_type": snmp_result.error_type,
+                    "error_details": snmp_result.error_details
+                })
+                logger.warning(f"SNMP detection failed: {snmp_result.error}")
+                self.warnings.append(f"SNMP detection failed: {snmp_result.error}")
         
         # Phase 2: SSH Verification or Detection
         if self._has_ssh_credentials():
@@ -167,38 +316,53 @@ class DeviceDetect:
                 ssh_phase_start = time.time()
                 self.ssh_verification_attempted = True
                 
-                verified, ssh_data = self._try_ssh_verification(self.snmp_result)
+                verify_result = self._try_ssh_verification(self.snmp_result)
                 ssh_elapsed = time.time() - ssh_phase_start
                 phase_timings["ssh_verify"] = ssh_elapsed
                 
-                if verified:
+                if verify_result.success and verify_result.device_type:
                     logger.info(f"SSH verification succeeded for {self.snmp_result}")
                     self.ssh_verification_success = True
                     self.ssh_result = self.snmp_result
-                    self.ssh_data = ssh_data
+                    self.ssh_data = verify_result.ssh_data
                 else:
                     logger.warning(f"SSH verification failed for {self.snmp_result}, falling back to full SSH detection")
                     self.ssh_verification_success = False
                     self.verification_notes = f"SSH verification failed for SNMP-detected {self.snmp_result}, performed full SSH autodetection"
+                    self.warnings.append(f"SSH verification failed for {self.snmp_result}: {verify_result.error}")
                     
                     # Fall back to full SSH detection
                     fallback_start = time.time()
-                    self.ssh_result, self.ssh_data = self._try_ssh_detection()
+                    ssh_result = self._try_ssh_detection()
                     phase_timings["ssh_detect"] = time.time() - fallback_start
                     
-                    if self.ssh_result:
+                    if ssh_result.success:
+                        self.ssh_result = ssh_result.device_type
+                        self.ssh_data = ssh_result.ssh_data
                         logger.info(f"SSH fallback detected: {self.ssh_result}")
             else:
                 # Normal SSH detection (no verification)
                 logger.info("Phase 2: Attempting SSH detection")
                 ssh_phase_start = time.time()
-                self.ssh_result, self.ssh_data = self._try_ssh_detection()
+                ssh_result = self._try_ssh_detection()
                 ssh_elapsed = time.time() - ssh_phase_start
                 phase_timings["ssh_connect"] = ssh_elapsed * 0.3  # Estimate
                 phase_timings["ssh_detect"] = ssh_elapsed * 0.7   # Estimate
                 
-                if self.ssh_result:
+                if ssh_result.success:
+                    self.ssh_result = ssh_result.device_type
+                    self.ssh_data = ssh_result.ssh_data
                     logger.info(f"SSH detected: {self.ssh_result}")
+                else:
+                    # Store error with context
+                    all_errors.append({
+                        "method": "ssh",
+                        "error": ssh_result.error,
+                        "error_type": ssh_result.error_type,
+                        "error_details": ssh_result.error_details
+                    })
+                    logger.warning(f"SSH detection failed: {ssh_result.error}")
+                    self.warnings.append(f"SSH detection failed: {ssh_result.error}")
         
         # Determine final result
         if self.snmp_result and self.ssh_result:
@@ -207,6 +371,7 @@ class DeviceDetect:
                 self.final_result = self.snmp_result
             else:
                 logger.warning(f"Detection conflict: SNMP={self.snmp_result}, SSH={self.ssh_result}")
+                self.warnings.append(f"Detection conflict: SNMP detected '{self.snmp_result}' but SSH detected '{self.ssh_result}' - using SSH result")
                 # Prefer SSH result as it's more detailed
                 self.final_result = self.ssh_result
         elif self.snmp_result:
@@ -224,7 +389,10 @@ class DeviceDetect:
         # Determine detection method
         method = self._determine_method()
         
-        # Build result
+        # Select primary error based on severity/actionability
+        primary_error = self._select_primary_error(all_errors) if all_errors else None
+        
+        # Determine overall success
         success = self.final_result is not None
         if not success:
             logger.warning("Device detection failed - no match found")
@@ -248,6 +416,13 @@ class DeviceDetect:
             ssh_verification_attempted=self.ssh_verification_attempted,
             ssh_verification_success=self.ssh_verification_success,
             verification_notes=self.verification_notes,
+            # Populate error fields from primary error
+            error=primary_error["error"] if primary_error else None,
+            error_type=primary_error["error_type"] if primary_error else None,
+            error_details=primary_error["error_details"] if primary_error else None,
+            # Include all errors for debugging
+            all_errors=all_errors if all_errors else None,
+            warnings=self.warnings if self.warnings else None,
             **framework_mappings
         )
         
@@ -385,24 +560,51 @@ class DeviceDetect:
         start_time = datetime.now()
         phase_timings = {}
         
+        # Track ALL errors from both methods
+        all_errors = []
+        
         # Collect SNMP data (without device type detection)
         if not ssh_only and self._has_snmp_credentials():
             logger.info("Collecting SNMP data")
             phase_start = time.time()
-            _, self.snmp_data = self._try_snmp_detection(detect_device_type=False)
+            snmp_result = self._try_snmp_detection(detect_device_type=False)
             phase_timings["snmp_collect"] = time.time() - phase_start
+            if snmp_result.success:
+                self.snmp_data = snmp_result.snmp_data
+            else:
+                # Store error with context
+                all_errors.append({
+                    "method": "snmp",
+                    "error": snmp_result.error,
+                    "error_type": snmp_result.error_type,
+                    "error_details": snmp_result.error_details
+                })
+                logger.warning(f"SNMP collection failed: {snmp_result.error}")
+                self.warnings.append(f"SNMP collection failed: {snmp_result.error}")
         
         # Collect SSH data (without device type detection)
         if not snmp_only and self._has_ssh_credentials():
             logger.info("Collecting SSH data")
             phase_start = time.time()
-            _, self.ssh_data = self._try_ssh_detection(
+            ssh_result = self._try_ssh_detection(
                 detect_device_type=False,
                 collect_ssh_commands=collect_ssh_commands,
                 additional_commands=additional_commands,
                 sanitize_commands=sanitize_output
             )
             phase_timings["ssh_collect"] = time.time() - phase_start
+            if ssh_result.success:
+                self.ssh_data = ssh_result.ssh_data
+            else:
+                # Store error with context
+                all_errors.append({
+                    "method": "ssh",
+                    "error": ssh_result.error,
+                    "error_type": ssh_result.error_type,
+                    "error_details": ssh_result.error_details
+                })
+                logger.warning(f"SSH collection failed: {ssh_result.error}")
+                self.warnings.append(f"SSH collection failed: {ssh_result.error}")
         
         # Calculate timing
         end_time = datetime.now()
@@ -413,6 +615,9 @@ class DeviceDetect:
         
         # Determine collection method
         method = self._determine_method()
+        
+        # Select primary error based on severity/actionability
+        primary_error = self._select_primary_error(all_errors) if all_errors else None
         
         # Build result
         result = DetectionResult(
@@ -427,7 +632,14 @@ class DeviceDetect:
             timing=TimingData(
                 total_seconds=total_seconds,
                 phase_timings=phase_timings
-            )
+            ),
+            # Populate error fields from primary error
+            error=primary_error["error"] if primary_error else None,
+            error_type=primary_error["error_type"] if primary_error else None,
+            error_details=primary_error["error_details"] if primary_error else None,
+            # Include all errors for debugging
+            all_errors=all_errors if all_errors else None,
+            warnings=self.warnings if self.warnings else None
         )
         
         logger.info(f"Data collection completed for {self.hostname}")
@@ -445,7 +657,7 @@ class DeviceDetect:
         """Check if SSH credentials are available."""
         return self.ssh_username is not None and self.ssh_password is not None
     
-    def _try_snmp_detection(self, detect_device_type: bool = True) -> tuple[Optional[str], Optional[SNMPData]]:
+    def _try_snmp_detection(self, detect_device_type: bool = True) -> MethodResult:
         """
         Attempt SNMP detection and data collection.
         
@@ -453,7 +665,7 @@ class DeviceDetect:
             detect_device_type: If True, run pattern matching. If False, only collect data.
         
         Returns:
-            Tuple of (device_type, snmp_data)
+            MethodResult with device_type and snmp_data, or error information
         """
         try:
             detector = SNMPDetector(
@@ -475,13 +687,29 @@ class DeviceDetect:
             # Collect SNMP data
             snmp_data = detector.get_snmp_data()
             
-            return device_type, snmp_data
+            # If no SNMP data was collected, treat as a timeout/connection error
+            if snmp_data is None:
+                error_msg = "SNMP timeout or connection failure"
+                logger.error(f"SNMP detection error: {error_msg}")
+                return MethodResult(
+                    error=error_msg,
+                    error_type="TimeoutError",
+                    error_details={"reason": "No SNMP data received from device"}
+                )
+            
+            return MethodResult(device_type=device_type, snmp_data=snmp_data)
             
         except Exception as e:
-            logger.error(f"SNMP detection error: {e}")
-            return None, None
+            # Map exception to standardized error format
+            error_msg, error_type, error_details = map_exception_to_error(e)
+            logger.error(f"SNMP detection error: {error_msg}")
+            return MethodResult(
+                error=error_msg,
+                error_type=error_type,
+                error_details=error_details
+            )
     
-    def _try_ssh_verification(self, device_type: str) -> tuple[bool, Optional[SSHData]]:
+    def _try_ssh_verification(self, device_type: str) -> MethodResult:
         """
         Verify a specific device type via SSH.
         
@@ -489,7 +717,7 @@ class DeviceDetect:
             device_type: The device type to verify
         
         Returns:
-            Tuple of (verified, ssh_data)
+            MethodResult with verification result (device_type if verified) and ssh_data, or error information
         """
         try:
             ssh_params = {
@@ -515,16 +743,26 @@ class DeviceDetect:
             # Collect SSH data
             ssh_data = detector.get_ssh_data(include_banners=include_banners)
             
-            return verified, ssh_data
+            # Return device_type if verified, None otherwise
+            return MethodResult(
+                device_type=device_type if verified else None,
+                ssh_data=ssh_data
+            )
             
         except Exception as e:
-            logger.error(f"SSH verification error: {e}")
-            return False, None
+            # Map exception to standardized error format
+            error_msg, error_type, error_details = map_exception_to_error(e)
+            logger.error(f"SSH verification error: {error_msg}")
+            return MethodResult(
+                error=error_msg,
+                error_type=error_type,
+                error_details=error_details
+            )
     
     def _try_ssh_detection(self, detect_device_type: bool = True,
                           collect_ssh_commands: bool = False,
                           additional_commands: Optional[list] = None,
-                          sanitize_commands: bool = False) -> tuple[Optional[str], Optional[SSHData]]:
+                          sanitize_commands: bool = False) -> MethodResult:
         """
         Attempt SSH detection and data collection.
         
@@ -535,7 +773,7 @@ class DeviceDetect:
             sanitize_commands: If True, remove escape characters from command outputs
         
         Returns:
-            Tuple of (device_type, ssh_data)
+            MethodResult with device_type and ssh_data, or error information
         """
         try:
             # Build SSH connection parameters
@@ -586,11 +824,51 @@ class DeviceDetect:
                 include_banners=include_banners
             )
             
-            return device_type, ssh_data
+            return MethodResult(device_type=device_type, ssh_data=ssh_data)
             
         except Exception as e:
-            logger.error(f"SSH detection error: {e}")
-            return None, None
+            # Map exception to standardized error format
+            error_msg, error_type, error_details = map_exception_to_error(e)
+            logger.error(f"SSH detection error: {error_msg}")
+            return MethodResult(
+                error=error_msg,
+                error_type=error_type,
+                error_details=error_details
+            )
+    
+    def _select_primary_error(self, all_errors: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """
+        Select primary error based on severity/actionability priority.
+        
+        Args:
+            all_errors: List of error dictionaries from SNMP/SSH phases
+            
+        Returns:
+            Primary error dictionary, or None if no errors
+        """
+        if not all_errors:
+            return None
+        
+        # Error priority ranking (lower = higher priority)
+        ERROR_PRIORITY = {
+            "AuthenticationError": 1,
+            "InvalidCredentialsError": 2,
+            "HostKeyError": 3,
+            "ConnectionError": 4,
+            "TimeoutError": 5,
+            "SNMPError": 6,
+            "NoDataError": 7,
+            "UnexpectedError": 8
+        }
+        
+        # Sort by priority (lower number = higher priority)
+        # If same priority, later errors (SSH) take precedence
+        sorted_errors = sorted(
+            all_errors,
+            key=lambda e: ERROR_PRIORITY.get(e.get("error_type", "UnexpectedError"), 99)
+        )
+        
+        return sorted_errors[0]
     
     def _calculate_score(self) -> int:
         """

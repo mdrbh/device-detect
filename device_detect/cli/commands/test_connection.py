@@ -144,7 +144,7 @@ def _test_snmp_connection(hostname, snmp_version=2, snmp_community=None, snmp_us
         raise Exception(f"SNMP connection failed: {e}")
 
 
-def _test_ssh_connection(hostname, ssh_username=None, ssh_password=None, ssh_port=22, ssh_enable_password=None):
+def _test_ssh_connection(hostname, ssh_username=None, ssh_password=None, ssh_port=22, ssh_enable_password=None, ssh_timing_profile=None, **kwargs):
     """Test SSH connection to a single device. Returns result dict for parallel processing."""
     try:
         detector = SSHDetector(

@@ -3,7 +3,7 @@ Constants and configuration defaults for device detection.
 """
 
 # Timeout configurations (in seconds)
-SNMP_TIMEOUT = 2
+SNMP_TIMEOUT = 5
 SSH_CONNECTION_TIMEOUT = 10
 SSH_COMMAND_TIMEOUT = 5
 OVERALL_TIMEOUT = 30

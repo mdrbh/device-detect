@@ -3,7 +3,7 @@ Data models for device detection results.
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import Optional, Dict
+from typing import Optional, Dict, List, Any
 import json
 
 
@@ -58,13 +58,47 @@ class TimingData:
 
 
 @dataclass
+class MethodResult:
+    """
+    Result from an internal detection method (_try_snmp_detection, _try_ssh_detection, etc.).
+    
+    This lightweight dataclass encapsulates both success and error states,
+    making error handling explicit and type-safe.
+    
+    Attributes:
+        device_type: Detected device type (e.g., 'cisco_ios'), None if not detected or error
+        snmp_data: SNMP collected data, None if not applicable or error
+        ssh_data: SSH collected data, None if not applicable or error
+        error: Error message if operation failed, None if successful
+        error_type: Error category (e.g., 'TimeoutError', 'AuthenticationError')
+        error_details: Additional error context (library, original exception, etc.)
+    """
+    device_type: Optional[str] = None
+    snmp_data: Optional['SNMPData'] = None
+    ssh_data: Optional['SSHData'] = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    error_details: Optional[Dict[str, Any]] = None
+    
+    @property
+    def success(self) -> bool:
+        """Check if the operation was successful (no error)."""
+        return self.error is None
+    
+    @property
+    def failed(self) -> bool:
+        """Check if the operation failed (has error)."""
+        return self.error is not None
+
+
+@dataclass
 class DetectionResult:
     """
     Complete device detection result.
     
     Attributes:
         hostname: Target device hostname/IP
-        operation_mode: Operation mode ('detect' or 'collect')
+        operation_mode: Operation mode ('detect', 'collect', or 'offline')
         method: Detection/collection method ('SNMP', 'SSH', or 'SNMP+SSH')
         success: Whether detection was successful
         device_type: Detected device type (e.g., 'cisco_ios'), None in collection mode
@@ -79,6 +113,10 @@ class DetectionResult:
         napalm_driver: NAPALM driver name for the detected device type
         nornir_driver: Nornir driver name for the detected device type
         ansible_driver: Ansible network_os for the detected device type
+        error: Error message if operation failed (None if successful)
+        error_type: Error category (e.g., 'TimeoutError', 'AuthenticationError')
+        error_details: Additional error context (library, original exception, etc.)
+        warnings: List of non-fatal warnings collected during operation
     """
     hostname: str
     operation_mode: str  # 'detect' or 'collect'
@@ -96,6 +134,11 @@ class DetectionResult:
     napalm_driver: Optional[str] = None
     nornir_driver: Optional[str] = None
     ansible_driver: Optional[str] = None
+    error: Optional[str] = None
+    error_type: Optional[str] = None
+    error_details: Optional[Dict[str, Any]] = None
+    all_errors: Optional[List[Dict[str, Any]]] = None
+    warnings: Optional[List[str]] = None
     
     @classmethod
     def from_dict(cls, data: dict) -> 'DetectionResult':
@@ -129,7 +172,11 @@ class DetectionResult:
             scrapli_driver=data.get('scrapli_driver'),
             napalm_driver=data.get('napalm_driver'),
             nornir_driver=data.get('nornir_driver'),
-            ansible_driver=data.get('ansible_driver')
+            ansible_driver=data.get('ansible_driver'),
+            error=data.get('error'),
+            error_type=data.get('error_type'),
+            error_details=data.get('error_details'),
+            warnings=data.get('warnings')
         )
     
     def to_dict(self) -> dict:

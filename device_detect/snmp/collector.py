@@ -1,5 +1,6 @@
 """SNMP data collection via async operations."""
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -34,6 +35,7 @@ async def collect_snmp_data(
     auth_password: Optional[str] = None,
     priv_proto: Optional[str] = None,
     priv_password: Optional[str] = None,
+    timeout: int = 5,
 ) -> Optional[SNMPData]:
     """
     Collect all SNMP data using multiget (sysDescr, sysObjectID, sysUpTime, sysName).
@@ -47,6 +49,7 @@ async def collect_snmp_data(
         auth_password: SNMPv3 authentication password
         priv_proto: SNMPv3 privacy protocol
         priv_password: SNMPv3 privacy password
+        timeout: SNMP timeout in seconds
         
     Returns:
         SNMPData object with collected data
@@ -59,7 +62,7 @@ async def collect_snmp_data(
         ObjectIdentifier(SNMP_SYS_NAME_OID),
     ]
     
-    # Create SNMP client
+    # Create SNMP client (without timeout parameter - not supported in puresnmp 2.0)
     client = create_snmp_client(
         hostname=hostname,
         version=version,
@@ -71,8 +74,8 @@ async def collect_snmp_data(
         priv_password=priv_password,
     )
     
-    # Execute multiget
-    results = await client.multiget(oids)
+    # Execute multiget with timeout wrapper
+    results = await asyncio.wait_for(client.multiget(oids), timeout=timeout)
     
     # Build SNMPData object
     snmp_data = SNMPData(
@@ -93,6 +96,7 @@ async def get_sysdescr(
     auth_password: Optional[str] = None,
     priv_proto: Optional[str] = None,
     priv_password: Optional[str] = None,
+    timeout: int = 5,
 ):
     """
     Query sysDescr OID via SNMP.
@@ -106,6 +110,7 @@ async def get_sysdescr(
         auth_password: SNMPv3 authentication password
         priv_proto: SNMPv3 privacy protocol
         priv_password: SNMPv3 privacy password
+        timeout: SNMP timeout in seconds
         
     Returns:
         Raw sysDescr value from SNMP
@@ -113,7 +118,7 @@ async def get_sysdescr(
     # Convert OID string to ObjectIdentifier
     oid = ObjectIdentifier(SNMP_SYS_DESCR_OID)
     
-    # Create SNMP client
+    # Create SNMP client (without timeout parameter - not supported in puresnmp 2.0)
     client = create_snmp_client(
         hostname=hostname,
         version=version,
@@ -125,6 +130,6 @@ async def get_sysdescr(
         priv_password=priv_password,
     )
     
-    # Execute get
-    result = await client.get(oid)
+    # Execute get with timeout wrapper
+    result = await asyncio.wait_for(client.get(oid), timeout=timeout)
     return result

@@ -172,6 +172,9 @@ def create_snmp_client(
     """
     Create SNMP client instance.
     
+    Note: Timeout should be applied using asyncio.wait_for() wrapper
+    around async operations, not passed to Client (not supported in puresnmp 2.0).
+    
     Args:
         hostname: Target device IP or hostname
         version: SNMP version (1, 2, or 3)

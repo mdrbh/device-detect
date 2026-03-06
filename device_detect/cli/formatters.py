@@ -43,7 +43,27 @@ def format_table(results: List[DetectionResult]) -> str:
             f"{result.timing.total_seconds:.2f}" if result.timing else "N/A"
         ])
     
-    return tabulate(rows, headers=headers, tablefmt="grid")
+    table_output = tabulate(rows, headers=headers, tablefmt="grid")
+    
+    # Add errors and warnings section if present
+    errors_warnings = []
+    for result in results:
+        if result.error or result.warnings:
+            errors_warnings.append(f"\n{result.hostname}:")
+            if result.error:
+                errors_warnings.append(f"  ERROR [{result.error_type or 'Unknown'}]: {result.error}")
+                if result.error_details:
+                    for key, value in result.error_details.items():
+                        errors_warnings.append(f"    - {key}: {value}")
+            if result.warnings:
+                for warning in result.warnings:
+                    errors_warnings.append(f"  WARNING: {warning}")
+    
+    if errors_warnings:
+        table_output += "\n\n" + "=" * 80 + "\nERRORS & WARNINGS\n" + "=" * 80
+        table_output += "\n".join(errors_warnings)
+    
+    return table_output
 
 
 def format_csv(results: List[DetectionResult], delimiter: str = ";") -> str:
@@ -66,12 +86,16 @@ def format_csv(results: List[DetectionResult], delimiter: str = ";") -> str:
     # Header
     writer.writerow([
         "hostname", "operation_mode", "method", "success", "device_type", "score",
-        "total_seconds", "snmp_sys_descr", "snmp_sys_object_id", "snmp_sys_name",
+        "total_seconds", "error", "error_type", "warnings",
+        "snmp_sys_descr", "snmp_sys_object_id", "snmp_sys_name",
         "ssh_version", "ssh_banner", "ssh_prompt"
     ])
     
     # Data rows
     for result in results:
+        # Format warnings as semicolon-separated string
+        warnings_str = "; ".join(result.warnings) if result.warnings else ""
+        
         writer.writerow([
             result.hostname,
             result.operation_mode,
@@ -80,6 +104,9 @@ def format_csv(results: List[DetectionResult], delimiter: str = ";") -> str:
             result.device_type or "",
             result.score,
             result.timing.total_seconds if result.timing else "",
+            result.error or "",
+            result.error_type or "",
+            warnings_str,
             result.snmp_data.sys_descr if result.snmp_data else "",
             result.snmp_data.sys_object_id if result.snmp_data else "",
             result.snmp_data.sys_name if result.snmp_data else "",
@@ -110,6 +137,17 @@ def format_excel(results: List[DetectionResult], output_file: str) -> None:
             "score": result.score,
             "total_seconds": result.timing.total_seconds if result.timing else None,
         }
+        
+        # Error information
+        if result.error:
+            row["error"] = result.error
+            row["error_type"] = result.error_type
+            if result.error_details:
+                row["error_details"] = str(result.error_details)
+        
+        # Warnings
+        if result.warnings:
+            row["warnings"] = "; ".join(result.warnings)
         
         # SNMP data
         if result.snmp_data:
