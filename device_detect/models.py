@@ -4,7 +4,21 @@ Data models for device detection results.
 
 from dataclasses import dataclass, field, asdict
 from typing import Optional, Dict, List, Any
+from datetime import datetime
 import json
+
+
+# Error type priority constants (used for primary_error selection)
+ERROR_PRIORITY = {
+    "AuthenticationError": 1,
+    "InvalidCredentialsError": 2,
+    "HostKeyError": 3,
+    "ConnectionError": 4,
+    "TimeoutError": 5,
+    "SNMPError": 6,
+    "NoDataError": 7,
+    "UnexpectedError": 8
+}
 
 
 @dataclass
@@ -58,6 +72,47 @@ class TimingData:
 
 
 @dataclass
+class ErrorRecord:
+    """
+    Structured error/warning record with full context.
+    
+    Provides detailed information about errors and warnings encountered
+    during device detection, including timestamp, phase, severity, and context.
+    
+    Attributes:
+        timestamp: ISO 8601 formatted timestamp
+        phase: Detection phase (e.g., "snmp_detect", "ssh_connect", "ssh_verify")
+        method: Detection method ("snmp" or "ssh")
+        severity: Error severity ("error" or "warning")
+        error_type: Standardized error type from error_mapping constants
+        message: Human-readable error message
+        library: Source library ("puresnmp", "netmiko", "paramiko", "socket", None)
+        exception_class: Original exception class name
+        context: Additional context (command, OID, timeout, etc.)
+        stack_trace: Stack trace (only when DEBUG logging enabled)
+    """
+    timestamp: str                          # ISO 8601 format
+    phase: str                              # Detection phase
+    method: str                             # "snmp" or "ssh"
+    severity: str                           # "error" or "warning"
+    error_type: str                         # Standardized error type
+    message: str                            # Human-readable message
+    library: Optional[str] = None           # Source library
+    exception_class: Optional[str] = None   # Original exception class
+    context: Optional[Dict[str, Any]] = None  # Additional context
+    stack_trace: Optional[str] = None       # Stack trace (DEBUG only)
+    
+    @classmethod
+    def from_dict(cls, data: dict) -> 'ErrorRecord':
+        """Create ErrorRecord from dictionary."""
+        return cls(**data)
+    
+    def to_dict(self) -> dict:
+        """Convert to dictionary."""
+        return asdict(self)
+
+
+@dataclass
 class MethodResult:
     """
     Result from an internal detection method (_try_snmp_detection, _try_ssh_detection, etc.).
@@ -69,26 +124,22 @@ class MethodResult:
         device_type: Detected device type (e.g., 'cisco_ios'), None if not detected or error
         snmp_data: SNMP collected data, None if not applicable or error
         ssh_data: SSH collected data, None if not applicable or error
-        error: Error message if operation failed, None if successful
-        error_type: Error category (e.g., 'TimeoutError', 'AuthenticationError')
-        error_details: Additional error context (library, original exception, etc.)
+        error_record: ErrorRecord if operation failed, None if successful
     """
     device_type: Optional[str] = None
-    snmp_data: Optional['SNMPData'] = None
-    ssh_data: Optional['SSHData'] = None
-    error: Optional[str] = None
-    error_type: Optional[str] = None
-    error_details: Optional[Dict[str, Any]] = None
+    snmp_data: Optional[SNMPData] = None
+    ssh_data: Optional[SSHData] = None
+    error_record: Optional[ErrorRecord] = None
     
     @property
     def success(self) -> bool:
         """Check if the operation was successful (no error)."""
-        return self.error is None
+        return self.error_record is None
     
     @property
     def failed(self) -> bool:
         """Check if the operation failed (has error)."""
-        return self.error is not None
+        return self.error_record is not None
 
 
 @dataclass
@@ -113,13 +164,10 @@ class DetectionResult:
         napalm_driver: NAPALM driver name for the detected device type
         nornir_driver: Nornir driver name for the detected device type
         ansible_driver: Ansible network_os for the detected device type
-        error: Error message if operation failed (None if successful)
-        error_type: Error category (e.g., 'TimeoutError', 'AuthenticationError')
-        error_details: Additional error context (library, original exception, etc.)
-        warnings: List of non-fatal warnings collected during operation
+        error_records: List of ErrorRecord objects (errors and warnings)
     """
     hostname: str
-    operation_mode: str  # 'detect' or 'collect'
+    operation_mode: str  # 'detect', 'collect', or 'offline'
     method: Optional[str]  # 'SNMP', 'SSH', or 'SNMP+SSH'
     success: bool
     device_type: Optional[str]
@@ -134,11 +182,40 @@ class DetectionResult:
     napalm_driver: Optional[str] = None
     nornir_driver: Optional[str] = None
     ansible_driver: Optional[str] = None
-    error: Optional[str] = None
-    error_type: Optional[str] = None
-    error_details: Optional[Dict[str, Any]] = None
-    all_errors: Optional[List[Dict[str, Any]]] = None
-    warnings: Optional[List[str]] = None
+    error_records: List[ErrorRecord] = field(default_factory=list)
+    
+    @property
+    def has_errors(self) -> bool:
+        """Check if any errors are present."""
+        return any(r.severity == "error" for r in self.error_records)
+    
+    @property
+    def has_warnings(self) -> bool:
+        """Check if any warnings are present."""
+        return any(r.severity == "warning" for r in self.error_records)
+    
+    @property
+    def errors(self) -> List[ErrorRecord]:
+        """Get all error records (severity='error')."""
+        return [r for r in self.error_records if r.severity == "error"]
+    
+    @property
+    def warnings(self) -> List[ErrorRecord]:
+        """Get all warning records (severity='warning')."""
+        return [r for r in self.error_records if r.severity == "warning"]
+    
+    @property
+    def primary_error(self) -> Optional[ErrorRecord]:
+        """
+        Get highest priority error based on error_type.
+        
+        Returns:
+            ErrorRecord with highest priority, or None if no errors
+        """
+        errors = self.errors
+        if not errors:
+            return None
+        return sorted(errors, key=lambda e: ERROR_PRIORITY.get(e.error_type, 99))[0]
     
     @classmethod
     def from_dict(cls, data: dict) -> 'DetectionResult':
@@ -155,6 +232,11 @@ class DetectionResult:
         snmp_data = SNMPData.from_dict(data.get('snmp_data'))
         ssh_data = SSHData.from_dict(data.get('ssh_data'))
         timing = TimingData.from_dict(data.get('timing'))
+        
+        # Reconstruct error_records
+        error_records = []
+        if 'error_records' in data and data['error_records']:
+            error_records = [ErrorRecord.from_dict(err) for err in data['error_records']]
         
         return cls(
             hostname=data['hostname'],
@@ -173,10 +255,7 @@ class DetectionResult:
             napalm_driver=data.get('napalm_driver'),
             nornir_driver=data.get('nornir_driver'),
             ansible_driver=data.get('ansible_driver'),
-            error=data.get('error'),
-            error_type=data.get('error_type'),
-            error_details=data.get('error_details'),
-            warnings=data.get('warnings')
+            error_records=error_records
         )
     
     def to_dict(self) -> dict:

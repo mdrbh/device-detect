@@ -3,14 +3,55 @@
 import logging
 import time
 import re
-from typing import Any, Optional
+import socket
+from typing import Any, Optional, Tuple
 
 import paramiko
 from netmiko.ssh_dispatcher import ConnectHandler
 from netmiko.base_connection import BaseConnection
 
+try:
+    from netmiko.exceptions import (
+        NetmikoTimeoutException,
+        NetmikoAuthenticationException,
+        ReadTimeout,
+        ConfigInvalidException,
+        ConnectionException as NetmikoConnectionException,
+    )
+    NETMIKO_AVAILABLE = True
+except ImportError:
+    NETMIKO_AVAILABLE = False
+    NetmikoTimeoutException = None
+    NetmikoAuthenticationException = None
+    ReadTimeout = None
+    ConfigInvalidException = None
+    NetmikoConnectionException = None
+
+try:
+    from paramiko.ssh_exception import (
+        SSHException,
+        AuthenticationException as ParamikoAuthException,
+        BadAuthenticationType,
+        PartialAuthentication,
+        ChannelException,
+        BadHostKeyException,
+        NoValidConnectionsError,
+    )
+    PARAMIKO_AVAILABLE = True
+except ImportError:
+    PARAMIKO_AVAILABLE = False
+    SSHException = None
+    ParamikoAuthException = None
+    BadAuthenticationType = None
+    PartialAuthentication = None
+    ChannelException = None
+    BadHostKeyException = None
+    NoValidConnectionsError = None
+
 from device_detect.exceptions import SSHDetectionError
 from device_detect.ssh.utils import strip_ansi_codes
+from device_detect.models import ErrorRecord
+from device_detect.error_mapping import create_error_record
 
 logger = logging.getLogger(__name__)
 
@@ -218,3 +259,145 @@ class SSHClient:
         if self.connection:
             logger.debug("Disconnecting SSH connection")
             self.connection.disconnect()
+
+
+def create_ssh_connection(
+    hostname: str,
+    timings: dict,
+    log_level: str = "INFO",
+    *args: Any,
+    **kwargs: Any
+) -> Tuple[Optional[SSHClient], Optional[ErrorRecord]]:
+    """
+    Create SSH connection with comprehensive error handling.
+    
+    Args:
+        hostname: Target device hostname/IP
+        timings: Timing profile dictionary
+        log_level: Logging level (for stack trace inclusion)
+        *args: Positional arguments for SSHClient
+        **kwargs: Keyword arguments for SSHClient
+        
+    Returns:
+        Tuple of (SSHClient or None, ErrorRecord or None)
+    """
+    try:
+        logger.info(f"[{hostname}] Attempting SSH connection")
+        ssh_client = SSHClient(timings, *args, **kwargs)
+        
+        # Check for edge cases
+        if not ssh_client.prompt:
+            logger.warning(f"[{hostname}] No prompt identified in initial buffer")
+            # This is a warning, not an error - connection succeeded but prompt not found
+        
+        if not ssh_client.initial_buffer or len(ssh_client.initial_buffer.strip()) == 0:
+            logger.warning(f"[{hostname}] Empty initial buffer after connection")
+            # This is unusual but not necessarily an error
+        
+        logger.info(f"[{hostname}] SSH connection established successfully")
+        return ssh_client, None
+        
+    except (NetmikoAuthenticationException, ParamikoAuthException) as e:
+        # Authentication failures
+        logger.error(f"[{hostname}] SSH authentication failed: {e}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_connect",
+            method="ssh",
+            severity="error",
+            context={"hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (BadAuthenticationType, PartialAuthentication) as e:
+        # Invalid credentials or auth method
+        logger.error(f"[{hostname}] SSH authentication method not supported: {e}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_connect",
+            method="ssh",
+            severity="error",
+            context={"hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except BadHostKeyException as e:
+        # Host key verification failed
+        logger.error(f"[{hostname}] SSH host key verification failed: {e}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_connect",
+            method="ssh",
+            severity="error",
+            context={"hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (NetmikoTimeoutException, ReadTimeout) as e:
+        # Connection timeout
+        logger.error(f"[{hostname}] SSH connection timed out: {e}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_connect",
+            method="ssh",
+            severity="error",
+            context={"hostname": hostname, "timeout": kwargs.get('timeout', 'unknown')},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (NetmikoConnectionException, NoValidConnectionsError, SSHException, ChannelException) as e:
+        # Connection failures
+        logger.error(f"[{hostname}] SSH connection failed: {e}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_connect",
+            method="ssh",
+            severity="error",
+            context={"hostname": hostname, "port": kwargs.get('port', 22)},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (socket.timeout, socket.error, OSError) as e:
+        # Network-level errors
+        logger.error(f"[{hostname}] Network error during SSH connection: {e}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_connect",
+            method="ssh",
+            severity="error",
+            context={"hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except SSHDetectionError as e:
+        # Already wrapped error from SSHClient.__init__
+        logger.error(f"[{hostname}] SSH detection error: {e}")
+        # Create error record from the wrapped exception
+        error_record = create_error_record(
+            e,
+            phase="ssh_connect",
+            method="ssh",
+            severity="error",
+            context={"hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except Exception as e:
+        # Catch-all for unexpected errors
+        logger.error(f"[{hostname}] Unexpected error during SSH connection: {e}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_connect",
+            method="ssh",
+            severity="error",
+            context={"hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record

@@ -2,10 +2,30 @@
 
 import logging
 import time
-from typing import Dict
+import socket
+from typing import Dict, Tuple, Optional
+
+try:
+    from netmiko.exceptions import (
+        NetmikoTimeoutException,
+        NetmikoAuthenticationException,
+        ReadTimeout,
+        ConfigInvalidException,
+        ConnectionException as NetmikoConnectionException,
+    )
+    NETMIKO_AVAILABLE = True
+except ImportError:
+    NETMIKO_AVAILABLE = False
+    NetmikoTimeoutException = None
+    NetmikoAuthenticationException = None
+    ReadTimeout = None
+    ConfigInvalidException = None
+    NetmikoConnectionException = None
 
 from device_detect.utils import sanitize_output
 from device_detect.ssh.utils import strip_ansi_codes
+from device_detect.models import ErrorRecord
+from device_detect.error_mapping import create_error_record
 
 logger = logging.getLogger(__name__)
 
@@ -212,3 +232,91 @@ class SSHCommandExecutor:
         response = self.send_command(cmd)
         self.results_cache[cmd] = response
         return response
+
+
+def execute_ssh_command(
+    executor: SSHCommandExecutor,
+    command: str,
+    hostname: str,
+    log_level: str = "INFO"
+) -> Tuple[Optional[str], Optional[ErrorRecord]]:
+    """
+    Execute SSH command with comprehensive error handling.
+    
+    Args:
+        executor: SSHCommandExecutor instance
+        command: Command to execute
+        hostname: Target device hostname/IP (for logging)
+        log_level: Logging level (for stack trace inclusion)
+        
+    Returns:
+        Tuple of (command output or None, ErrorRecord or None)
+    """
+    try:
+        logger.debug(f"[{hostname}] Executing command: {command}")
+        output = executor.send_command_wrapper(command)
+        
+        # Edge case: Empty output
+        if not output or len(output.strip()) == 0:
+            logger.warning(f"[{hostname}] Empty output for command: {command}")
+            # This is a warning, not an error - command executed but returned nothing
+        
+        # Edge case: Incomplete response
+        if executor.is_response_incomplete(output, command):
+            logger.warning(f"[{hostname}] Potentially incomplete response for command: {command}")
+            # Return the partial output but log warning
+        
+        logger.debug(f"[{hostname}] Command executed successfully, output length: {len(output)}")
+        return output, None
+        
+    except (ReadTimeout, NetmikoTimeoutException) as e:
+        # Command execution timeout
+        logger.error(f"[{hostname}] Command timed out: {command}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_command",
+            method="ssh",
+            severity="error",
+            context={"command": command, "hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (NetmikoConnectionException, NetmikoAuthenticationException) as e:
+        # Connection lost during command execution
+        logger.error(f"[{hostname}] Connection error during command execution: {command}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_command",
+            method="ssh",
+            severity="error",
+            context={"command": command, "hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (socket.timeout, socket.error, OSError) as e:
+        # Network-level errors
+        logger.error(f"[{hostname}] Network error during command execution: {command}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_command",
+            method="ssh",
+            severity="error",
+            context={"command": command, "hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except Exception as e:
+        # Catch-all for unexpected errors
+        logger.error(f"[{hostname}] Unexpected error executing command '{command}': {e}")
+        error_record = create_error_record(
+            e,
+            phase="ssh_command",
+            method="ssh",
+            severity="error",
+            context={"command": command, "hostname": hostname},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record

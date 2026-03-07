@@ -14,7 +14,7 @@ from device_detect.exceptions import DeviceDetectError
 from device_detect.utils import setup_logging
 from device_detect.constants import DEFAULT_LOG_LEVEL
 from device_detect.models import DetectionResult, SNMPData, SSHData, MethodResult
-from device_detect.error_mapping import map_exception_to_error
+from device_detect.error_mapping import map_exception_to_error, create_error_record
 from device_detect.utils import validate_hostname
 from device_detect.validation import validate_config
 from device_detect.result_builder import build_detection_result, build_collection_result
@@ -108,6 +108,14 @@ class DeviceDetect:
         """
         # Validate hostname
         if not validate_hostname(hostname):
+            # Create a simple ValueError for invalid hostname
+            exc = ValueError(f"Invalid hostname: {hostname}")
+            error_record = create_error_record(
+                exception=exc,
+                phase="validation",
+                method="config",
+                context={"hostname": hostname, "reason": "Hostname validation failed"}
+            )
             return DetectionResult(
                 hostname=hostname,
                 operation_mode="detect",
@@ -115,9 +123,7 @@ class DeviceDetect:
                 success=False,
                 device_type=None,
                 score=0,
-                error=f"Invalid hostname: {hostname}",
-                error_type="ConfigurationError",
-                error_details={"hostname": hostname, "reason": "Hostname validation failed"}
+                error_records=[error_record]
             )
         
         # Validate credentials - at least one method must be available
@@ -125,6 +131,17 @@ class DeviceDetect:
         has_ssh = ssh_username and ssh_password
         
         if not has_snmp and not has_ssh:
+            exc = ValueError("No valid credentials provided - need either SNMP or SSH credentials")
+            error_record = create_error_record(
+                exception=exc,
+                phase="validation",
+                method="config",
+                context={
+                    "snmp_available": has_snmp,
+                    "ssh_available": has_ssh,
+                    "reason": "At least one detection method (SNMP or SSH) must have valid credentials"
+                }
+            )
             return DetectionResult(
                 hostname=hostname,
                 operation_mode="detect",
@@ -132,13 +149,7 @@ class DeviceDetect:
                 success=False,
                 device_type=None,
                 score=0,
-                error="No valid credentials provided - need either SNMP or SSH credentials",
-                error_type="ConfigurationError",
-                error_details={
-                    "snmp_available": has_snmp,
-                    "ssh_available": has_ssh,
-                    "reason": "At least one detection method (SNMP or SSH) must have valid credentials"
-                }
+                error_records=[error_record]
             )
         
         # All validations passed - create instance
@@ -166,7 +177,12 @@ class DeviceDetect:
             )
         except Exception as e:
             # Catch any unexpected initialization errors
-            error_msg, error_type, error_details = map_exception_to_error(e)
+            error_record = create_error_record(
+                exception=e,
+                phase="initialization",
+                method="config",
+                context={"exception_type": type(e).__name__, "exception_message": str(e)}
+            )
             return DetectionResult(
                 hostname=hostname,
                 operation_mode="detect",
@@ -174,9 +190,7 @@ class DeviceDetect:
                 success=False,
                 device_type=None,
                 score=0,
-                error=error_msg,
-                error_type=error_type,
-                error_details=error_details
+                error_records=[error_record]
             )
     
     def __init__(
@@ -288,7 +302,7 @@ class DeviceDetect:
         
         # Execute detection using DetectionOperation
         operation = DetectionOperation(self)
-        final_result, snmp_result, ssh_result, all_errors, phase_timings = operation.execute()
+        final_result, snmp_result, ssh_result, error_records, phase_timings = operation.execute()
         
         # Update instance state
         self.final_result = final_result
@@ -306,8 +320,7 @@ class DeviceDetect:
             ssh_verification_attempted=self.ssh_verification_attempted,
             ssh_verification_success=self.ssh_verification_success,
             verification_notes=self.verification_notes,
-            warnings=self.warnings,
-            all_errors=all_errors,
+            error_records=error_records,
             start_time=start_time,
             phase_timings=phase_timings
         )
@@ -442,7 +455,7 @@ class DeviceDetect:
         
         # Execute collection using CollectionOperation
         operation = CollectionOperation(self)
-        all_errors, phase_timings = operation.execute(
+        error_records, phase_timings = operation.execute(
             snmp_only=snmp_only,
             ssh_only=ssh_only,
             collect_ssh_commands=collect_ssh_commands,
@@ -455,8 +468,7 @@ class DeviceDetect:
             hostname=self.hostname,
             snmp_data=self.snmp_data,
             ssh_data=self.ssh_data,
-            warnings=self.warnings,
-            all_errors=all_errors,
+            error_records=error_records,
             start_time=start_time,
             phase_timings=phase_timings
         )
@@ -505,24 +517,34 @@ class DeviceDetect:
             
             # If no SNMP data was collected, treat as a timeout/connection error
             if snmp_data is None:
-                error_msg = "SNMP timeout or connection failure"
-                logger.error(f"SNMP detection error: {error_msg}")
+                exc = TimeoutError("SNMP timeout or connection failure")
+                error_record = create_error_record(
+                    exception=exc,
+                    phase="snmp_detect",
+                    method="snmp",
+                    context={"reason": "No SNMP data received from device"}
+                )
+                logger.error(f"SNMP detection error: {error_record.message}")
                 return MethodResult(
-                    error=error_msg,
-                    error_type="TimeoutError",
-                    error_details={"reason": "No SNMP data received from device"}
+                    device_type=None,
+                    snmp_data=None,
+                    error_record=error_record
                 )
             
             return MethodResult(device_type=device_type, snmp_data=snmp_data)
             
         except Exception as e:
-            # Map exception to standardized error format
-            error_msg, error_type, error_details = map_exception_to_error(e)
-            logger.error(f"SNMP detection error: {error_msg}")
+            # Create standardized error record
+            error_record = create_error_record(
+                exception=e,
+                phase="snmp_detect",
+                method="snmp"
+            )
+            logger.error(f"SNMP detection error: {error_record.message}")
             return MethodResult(
-                error=error_msg,
-                error_type=error_type,
-                error_details=error_details
+                device_type=None,
+                snmp_data=None,
+                error_record=error_record
             )
     
     def _try_ssh_verification(self, device_type: str) -> MethodResult:
@@ -566,13 +588,18 @@ class DeviceDetect:
             )
             
         except Exception as e:
-            # Map exception to standardized error format
-            error_msg, error_type, error_details = map_exception_to_error(e)
-            logger.error(f"SSH verification error: {error_msg}")
+            # Create standardized error record
+            error_record = create_error_record(
+                exception=e,
+                phase="ssh_verify",
+                method="ssh",
+                context={"verifying_device_type": device_type}
+            )
+            logger.error(f"SSH verification error: {error_record.message}")
             return MethodResult(
-                error=error_msg,
-                error_type=error_type,
-                error_details=error_details
+                device_type=None,
+                ssh_data=None,
+                error_record=error_record
             )
     
     def _try_ssh_detection(self, detect_device_type: bool = True,
@@ -643,13 +670,17 @@ class DeviceDetect:
             return MethodResult(device_type=device_type, ssh_data=ssh_data)
             
         except Exception as e:
-            # Map exception to standardized error format
-            error_msg, error_type, error_details = map_exception_to_error(e)
-            logger.error(f"SSH detection error: {error_msg}")
+            # Create standardized error record
+            error_record = create_error_record(
+                exception=e,
+                phase="ssh_detect",
+                method="ssh"
+            )
+            logger.error(f"SSH detection error: {error_record.message}")
             return MethodResult(
-                error=error_msg,
-                error_type=error_type,
-                error_details=error_details
+                device_type=None,
+                ssh_data=None,
+                error_record=error_record
             )
     
     def _select_primary_error(self, all_errors: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:

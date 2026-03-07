@@ -2,16 +2,27 @@
 
 import asyncio
 import logging
-from typing import Optional
+import socket
+from typing import Optional, Tuple
 
 try:
     from puresnmp import ObjectIdentifier
-    from puresnmp.exc import Timeout as PureSNMPTimeout
+    from puresnmp.exc import (
+        Timeout as PureSNMPTimeout,
+        NoSuchOID,
+        ErrorResponse as SNMPErrorResponse,
+        SnmpError,
+        EmptyMessage,
+    )
     PURESNMP_AVAILABLE = True
 except ImportError:
     PURESNMP_AVAILABLE = False
     ObjectIdentifier = None
     PureSNMPTimeout = None
+    NoSuchOID = None
+    SNMPErrorResponse = None
+    SnmpError = None
+    EmptyMessage = None
 
 from device_detect.constants import (
     SNMP_SYS_DESCR_OID,
@@ -19,9 +30,10 @@ from device_detect.constants import (
     SNMP_SYS_UPTIME_OID,
     SNMP_SYS_NAME_OID,
 )
-from device_detect.models import SNMPData
+from device_detect.models import SNMPData, ErrorRecord
 from device_detect.snmp.utils import sanitize_snmp_value
 from device_detect.snmp.client import create_snmp_client
+from device_detect.error_mapping import create_error_record
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +48,8 @@ async def collect_snmp_data(
     priv_proto: Optional[str] = None,
     priv_password: Optional[str] = None,
     timeout: int = 5,
-) -> Optional[SNMPData]:
+    log_level: str = "INFO",
+) -> Tuple[Optional[SNMPData], Optional[ErrorRecord]]:
     """
     Collect all SNMP data using multiget (sysDescr, sysObjectID, sysUpTime, sysName).
     
@@ -50,41 +63,108 @@ async def collect_snmp_data(
         priv_proto: SNMPv3 privacy protocol
         priv_password: SNMPv3 privacy password
         timeout: SNMP timeout in seconds
+        log_level: Logging level (for stack trace inclusion)
         
     Returns:
-        SNMPData object with collected data
+        Tuple of (SNMPData object or None, ErrorRecord or None)
     """
-    # Convert OID strings to ObjectIdentifiers
-    oids = [
-        ObjectIdentifier(SNMP_SYS_DESCR_OID),
-        ObjectIdentifier(SNMP_SYS_OBJECT_ID_OID),
-        ObjectIdentifier(SNMP_SYS_UPTIME_OID),
-        ObjectIdentifier(SNMP_SYS_NAME_OID),
-    ]
-    
-    # Create SNMP client (without timeout parameter - not supported in puresnmp 2.0)
-    client = create_snmp_client(
-        hostname=hostname,
-        version=version,
-        community=community,
-        user=user,
-        auth_proto=auth_proto,
-        auth_password=auth_password,
-        priv_proto=priv_proto,
-        priv_password=priv_password,
-    )
-    
-    # Execute multiget with timeout wrapper
-    results = await asyncio.wait_for(client.multiget(oids), timeout=timeout)
-    
-    # Build SNMPData object
-    snmp_data = SNMPData(
-        sys_descr=sanitize_snmp_value(results[0]),
-        sys_object_id=sanitize_snmp_value(results[1]),
-        sys_uptime=sanitize_snmp_value(results[2]),
-        sys_name=sanitize_snmp_value(results[3]),
-    )
-    return snmp_data
+    try:
+        # Convert OID strings to ObjectIdentifiers
+        oids = [
+            ObjectIdentifier(SNMP_SYS_DESCR_OID),
+            ObjectIdentifier(SNMP_SYS_OBJECT_ID_OID),
+            ObjectIdentifier(SNMP_SYS_UPTIME_OID),
+            ObjectIdentifier(SNMP_SYS_NAME_OID),
+        ]
+        
+        # Create SNMP client (without timeout parameter - not supported in puresnmp 2.0)
+        client = create_snmp_client(
+            hostname=hostname,
+            version=version,
+            community=community,
+            user=user,
+            auth_proto=auth_proto,
+            auth_password=auth_password,
+            priv_proto=priv_proto,
+            priv_password=priv_password,
+        )
+        
+        # Execute multiget with timeout wrapper
+        results = await asyncio.wait_for(client.multiget(oids), timeout=timeout)
+        
+        # Build SNMPData object
+        snmp_data = SNMPData(
+            sys_descr=sanitize_snmp_value(results[0]),
+            sys_object_id=sanitize_snmp_value(results[1]),
+            sys_uptime=sanitize_snmp_value(results[2]),
+            sys_name=sanitize_snmp_value(results[3]),
+        )
+        
+        # Check for empty sysDescr (edge case)
+        if not snmp_data.sys_descr or snmp_data.sys_descr.strip() == "":
+            logger.warning(f"[{hostname}] Empty sysDescr received from device")
+            # Return data anyway, but log warning
+        
+        logger.debug(f"[{hostname}] SNMP data collected successfully")
+        return snmp_data, None
+        
+    except asyncio.TimeoutError as e:
+        # asyncio.wait_for raises TimeoutError, not PureSNMPTimeout
+        logger.error(f"[{hostname}] SNMP collection timed out after {timeout}s")
+        error_record = create_error_record(
+            e,
+            phase="snmp_collect",
+            method="snmp",
+            severity="error",
+            context={"timeout": timeout, "oids": [SNMP_SYS_DESCR_OID, SNMP_SYS_OBJECT_ID_OID, SNMP_SYS_UPTIME_OID, SNMP_SYS_NAME_OID]},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (PureSNMPTimeout, NoSuchOID, SNMPErrorResponse, SnmpError, EmptyMessage) as e:
+        # PureSNMP-specific exceptions
+        if isinstance(e, NoSuchOID):
+            logger.warning(f"[{hostname}] SNMP OID not found: {e}")
+            severity = "warning"
+        else:
+            logger.error(f"[{hostname}] SNMP error during collection: {e}")
+            severity = "error"
+            
+        error_record = create_error_record(
+            e,
+            phase="snmp_collect",
+            method="snmp",
+            severity=severity,
+            context={"timeout": timeout, "version": version},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (socket.timeout, socket.error, OSError) as e:
+        # Network-level exceptions
+        logger.error(f"[{hostname}] Network error during SNMP collection: {e}")
+        error_record = create_error_record(
+            e,
+            phase="snmp_collect",
+            method="snmp",
+            severity="error",
+            context={"timeout": timeout},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except Exception as e:
+        # Catch-all for unexpected exceptions
+        logger.error(f"[{hostname}] Unexpected error during SNMP collection: {e}")
+        error_record = create_error_record(
+            e,
+            phase="snmp_collect",
+            method="snmp",
+            severity="error",
+            context={"timeout": timeout},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
 
 
 async def get_sysdescr(
@@ -97,7 +177,8 @@ async def get_sysdescr(
     priv_proto: Optional[str] = None,
     priv_password: Optional[str] = None,
     timeout: int = 5,
-):
+    log_level: str = "INFO",
+) -> Tuple[Optional[str], Optional[ErrorRecord]]:
     """
     Query sysDescr OID via SNMP.
     
@@ -111,25 +192,82 @@ async def get_sysdescr(
         priv_proto: SNMPv3 privacy protocol
         priv_password: SNMPv3 privacy password
         timeout: SNMP timeout in seconds
+        log_level: Logging level (for stack trace inclusion)
         
     Returns:
-        Raw sysDescr value from SNMP
+        Tuple of (Raw sysDescr value or None, ErrorRecord or None)
     """
-    # Convert OID string to ObjectIdentifier
-    oid = ObjectIdentifier(SNMP_SYS_DESCR_OID)
-    
-    # Create SNMP client (without timeout parameter - not supported in puresnmp 2.0)
-    client = create_snmp_client(
-        hostname=hostname,
-        version=version,
-        community=community,
-        user=user,
-        auth_proto=auth_proto,
-        auth_password=auth_password,
-        priv_proto=priv_proto,
-        priv_password=priv_password,
-    )
-    
-    # Execute get with timeout wrapper
-    result = await asyncio.wait_for(client.get(oid), timeout=timeout)
-    return result
+    try:
+        # Convert OID string to ObjectIdentifier
+        oid = ObjectIdentifier(SNMP_SYS_DESCR_OID)
+        
+        # Create SNMP client (without timeout parameter - not supported in puresnmp 2.0)
+        client = create_snmp_client(
+            hostname=hostname,
+            version=version,
+            community=community,
+            user=user,
+            auth_proto=auth_proto,
+            auth_password=auth_password,
+            priv_proto=priv_proto,
+            priv_password=priv_password,
+        )
+        
+        # Execute get with timeout wrapper
+        result = await asyncio.wait_for(client.get(oid), timeout=timeout)
+        logger.debug(f"[{hostname}] sysDescr retrieved successfully")
+        return result, None
+        
+    except asyncio.TimeoutError as e:
+        logger.error(f"[{hostname}] sysDescr query timed out after {timeout}s")
+        error_record = create_error_record(
+            e,
+            phase="snmp_sysdescr",
+            method="snmp",
+            severity="error",
+            context={"timeout": timeout, "oid": SNMP_SYS_DESCR_OID},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (PureSNMPTimeout, NoSuchOID, SNMPErrorResponse, SnmpError, EmptyMessage) as e:
+        if isinstance(e, NoSuchOID):
+            logger.warning(f"[{hostname}] sysDescr OID not found on device")
+            severity = "warning"
+        else:
+            logger.error(f"[{hostname}] SNMP error querying sysDescr: {e}")
+            severity = "error"
+            
+        error_record = create_error_record(
+            e,
+            phase="snmp_sysdescr",
+            method="snmp",
+            severity=severity,
+            context={"timeout": timeout, "oid": SNMP_SYS_DESCR_OID, "version": version},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except (socket.timeout, socket.error, OSError) as e:
+        logger.error(f"[{hostname}] Network error querying sysDescr: {e}")
+        error_record = create_error_record(
+            e,
+            phase="snmp_sysdescr",
+            method="snmp",
+            severity="error",
+            context={"timeout": timeout, "oid": SNMP_SYS_DESCR_OID},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record
+        
+    except Exception as e:
+        logger.error(f"[{hostname}] Unexpected error querying sysDescr: {e}")
+        error_record = create_error_record(
+            e,
+            phase="snmp_sysdescr",
+            method="snmp",
+            severity="error",
+            context={"timeout": timeout, "oid": SNMP_SYS_DESCR_OID},
+            include_stack_trace=(log_level == "DEBUG")
+        )
+        return None, error_record

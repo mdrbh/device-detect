@@ -22,7 +22,8 @@ from device_detect.patterns import (
     DEVICE_TYPE_ALIASES,
 )
 from device_detect.exceptions import SSHDetectionError
-from device_detect.ssh.client import SSHClient
+from device_detect.models import MethodResult
+from device_detect.ssh.client import SSHClient, create_ssh_connection
 from device_detect.ssh.commands import SSHCommandExecutor
 from device_detect.ssh.collector import SSHCollector
 from device_detect.ssh.utils import get_ssh_mapper_base
@@ -563,6 +564,33 @@ class SSHDetector:
             additional_commands=additional_commands,
             include_banners=include_banners
         )
+    
+    def get_ssh_data_with_errors(
+        self, 
+        detection_commands: Optional[Dict[str, str]] = None, 
+        additional_commands: Optional[Dict[str, str]] = None,
+        include_banners: bool = True
+    ) -> MethodResult:
+        """
+        Get collected SSH data wrapped in MethodResult.
+        
+        This method wraps get_ssh_data() to provide consistent error handling
+        interface with other collection methods.
+        
+        Args:
+            detection_commands: Optional dict of detection command outputs
+            additional_commands: Optional dict of additional command outputs
+            include_banners: If False, exclude banner fields from result (default: True)
+        
+        Returns:
+            MethodResult with SSHData (error_record will be None for SSH detector)
+        """
+        ssh_data = self.get_ssh_data(
+            detection_commands=detection_commands,
+            additional_commands=additional_commands,
+            include_banners=include_banners
+        )
+        return MethodResult(ssh_data=ssh_data)
     
     def disconnect(self) -> None:
         """Disconnect the SSH connection."""

@@ -4,8 +4,9 @@ import logging
 from typing import Dict, List, Optional
 
 from device_detect.patterns import SSH_MAPPER_DICT
-from device_detect.models import SSHData
+from device_detect.models import SSHData, MethodResult, ErrorRecord
 from device_detect.ssh.utils import strip_ansi_codes
+from device_detect.ssh.commands import execute_ssh_command
 
 logger = logging.getLogger(__name__)
 

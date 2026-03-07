@@ -13,7 +13,7 @@ if readme_file.exists():
 
 setup(
     name="device-detect",
-    version="0.10.0",
+    version="0.11.0",
     author="Mohamed RABAH",
     author_email="mdrbh0@gmail.com",
     description="Automatic network device type detection using SNMP and SSH",

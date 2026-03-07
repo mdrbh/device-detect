@@ -20,7 +20,7 @@ from device_detect.constants import (
 )
 from device_detect.patterns import SNMP_MAPPER_DICT
 from device_detect.exceptions import SNMPDetectionError
-from device_detect.models import SNMPData
+from device_detect.models import SNMPData, MethodResult
 from device_detect.snmp.client import validate_snmp_credentials
 from device_detect.snmp.collector import collect_snmp_data, get_sysdescr
 from device_detect.snmp.utils import sanitize_snmp_value
@@ -147,68 +147,72 @@ class SNMPDetector:
             logger.warning(f"SNMP detection failed: {e}")
             return None
     
-    def get_snmp_data(self) -> Optional[SNMPData]:
+    def get_snmp_data(self, log_level: str = "INFO") -> MethodResult:
         """
         Collect all SNMP data (sysDescr, sysObjectID, sysUpTime, sysName).
         
+        Args:
+            log_level: Logging level (for stack trace inclusion)
+        
         Returns:
-            SNMPData object with collected data, or None on failure
+            MethodResult with SNMPData or ErrorRecord
         """
-        try:
-            # Run async SNMP multiget in sync context
-            result = asyncio.run(
-                collect_snmp_data(
-                    hostname=self.hostname,
-                    version=self.version,
-                    community=self.community,
-                    user=self.user,
-                    auth_proto=self.auth_proto,
-                    auth_password=self.auth_password,
-                    priv_proto=self.priv_proto,
-                    priv_password=self.priv_password,
-                    timeout=self.timeout,
-                )
+        logger.info(f"[{self.hostname}] Starting SNMP data collection")
+        
+        # Run async SNMP multiget in sync context
+        snmp_data, error_record = asyncio.run(
+            collect_snmp_data(
+                hostname=self.hostname,
+                version=self.version,
+                community=self.community,
+                user=self.user,
+                auth_proto=self.auth_proto,
+                auth_password=self.auth_password,
+                priv_proto=self.priv_proto,
+                priv_password=self.priv_password,
+                timeout=self.timeout,
+                log_level=log_level,
             )
-            return result
-            
-        except PureSNMPTimeout:
-            logger.warning(f"SNMP timeout querying {self.hostname}")
-            return None
-        except Exception as e:
-            logger.error(f"SNMP data collection failed: {e}")
-            return None
+        )
+        
+        if error_record:
+            logger.error(f"[{self.hostname}] SNMP data collection failed: {error_record.message}")
+            return MethodResult(error_record=error_record)
+        
+        logger.info(f"[{self.hostname}] SNMP data collection successful")
+        return MethodResult(snmp_data=snmp_data)
     
-    def _get_sysdescr(self) -> Optional[str]:
+    def _get_sysdescr(self, log_level: str = "INFO") -> Optional[str]:
         """
         Query sysDescr OID via SNMP.
+        
+        Args:
+            log_level: Logging level (for stack trace inclusion)
         
         Returns:
             sysDescr string or None on failure
         """
-        try:
-            # Run async SNMP query in sync context
-            result = asyncio.run(
-                get_sysdescr(
-                    hostname=self.hostname,
-                    version=self.version,
-                    community=self.community,
-                    user=self.user,
-                    auth_proto=self.auth_proto,
-                    auth_password=self.auth_password,
-                    priv_proto=self.priv_proto,
-                    priv_password=self.priv_password,
-                    timeout=self.timeout,
-                )
+        # Run async SNMP query in sync context
+        result, error_record = asyncio.run(
+            get_sysdescr(
+                hostname=self.hostname,
+                version=self.version,
+                community=self.community,
+                user=self.user,
+                auth_proto=self.auth_proto,
+                auth_password=self.auth_password,
+                priv_proto=self.priv_proto,
+                priv_password=self.priv_password,
+                timeout=self.timeout,
+                log_level=log_level,
             )
-            
-            # Sanitize and convert result to string
-            if result:
-                return sanitize_snmp_value(result)
+        )
+        
+        if error_record:
+            logger.error(f"[{self.hostname}] sysDescr query failed: {error_record.message}")
             return None
-            
-        except PureSNMPTimeout:
-            logger.warning(f"SNMP timeout querying {self.hostname}")
-            return None
-        except Exception as e:
-            logger.error(f"SNMP query failed: {e}")
-            return None
+        
+        # Sanitize and convert result to string
+        if result:
+            return sanitize_snmp_value(result)
+        return None

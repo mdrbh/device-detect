@@ -6,9 +6,11 @@ and paramiko libraries, converting library-specific exceptions into
 user-friendly error messages with categorization.
 """
 
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
+from datetime import datetime
 import logging
 import socket
+import traceback
 
 # Import third-party exceptions with graceful fallback
 try:
@@ -314,3 +316,78 @@ def should_retry_on_exception(exception: Exception) -> bool:
     
     # Default: don't retry
     return False
+
+
+def create_error_record(
+    exception: Exception,
+    phase: str,
+    method: str,
+    severity: str = "error",
+    context: Optional[Dict[str, Any]] = None,
+    include_stack_trace: bool = False
+) -> 'ErrorRecord':
+    """
+    Create ErrorRecord from exception with full context.
+    
+    This function converts exceptions into structured ErrorRecord objects,
+    preserving all relevant information for troubleshooting and logging.
+    
+    Args:
+        exception: Caught exception
+        phase: Detection phase (e.g., "snmp_detect", "ssh_connect", "ssh_verify")
+        method: Detection method ("snmp" or "ssh")
+        severity: Error severity ("error" or "warning")
+        context: Additional context dict (command, OID, timeout, etc.)
+        include_stack_trace: Include stack trace (when DEBUG logging enabled)
+        
+    Returns:
+        ErrorRecord with all details populated
+        
+    Example:
+        >>> try:
+        ...     # SNMP operation
+        ... except Exception as e:
+        ...     error_rec = create_error_record(
+        ...         e, "snmp_detect", "snmp",
+        ...         context={"oid": "1.3.6.1.2.1.1.1.0"},
+        ...         include_stack_trace=log_level == "DEBUG"
+        ...     )
+    """
+    from device_detect.models import ErrorRecord
+    
+    # Map exception to standardized format
+    message, error_type, error_details = map_exception_to_error(exception)
+    
+    # Create timestamp
+    timestamp = datetime.now().isoformat()
+    
+    # Extract exception class name
+    exception_class = type(exception).__name__
+    
+    # Get library from error_details
+    library = error_details.get("library")
+    
+    # Merge context with error_details
+    full_context = context.copy() if context else {}
+    # Add original exception details to context
+    for key, value in error_details.items():
+        if key not in full_context and key != "library":
+            full_context[key] = value
+    
+    # Capture stack trace if requested
+    stack_trace = None
+    if include_stack_trace:
+        stack_trace = traceback.format_exc()
+    
+    return ErrorRecord(
+        timestamp=timestamp,
+        phase=phase,
+        method=method,
+        severity=severity,
+        error_type=error_type,
+        message=message,
+        library=library,
+        exception_class=exception_class,
+        context=full_context if full_context else None,
+        stack_trace=stack_trace
+    )

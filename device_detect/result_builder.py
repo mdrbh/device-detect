@@ -1,13 +1,13 @@
 """
 Result building and error handling utilities.
-Handles score calculation, error selection, and DetectionResult construction.
+Handles score calculation and DetectionResult construction.
 """
 
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from datetime import datetime
 
-from device_detect.models import DetectionResult, SNMPData, SSHData, TimingData
+from device_detect.models import DetectionResult, SNMPData, SSHData, TimingData, ErrorRecord
 from device_detect.mapper import get_framework_drivers
 
 logger = logging.getLogger(__name__)
@@ -63,39 +63,6 @@ def calculate_detection_score(
     return 50
 
 
-def select_primary_error(all_errors: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """
-    Select primary error based on severity/actionability priority.
-    
-    Args:
-        all_errors: List of error dictionaries from SNMP/SSH phases
-        
-    Returns:
-        Primary error dictionary, or None if no errors
-    """
-    if not all_errors:
-        return None
-    
-    # Error priority ranking (lower = higher priority)
-    ERROR_PRIORITY = {
-        "AuthenticationError": 1,
-        "InvalidCredentialsError": 2,
-        "HostKeyError": 3,
-        "ConnectionError": 4,
-        "TimeoutError": 5,
-        "SNMPError": 6,
-        "NoDataError": 7,
-        "UnexpectedError": 8
-    }
-    
-    # Sort by priority (lower number = higher priority)
-    # If same priority, later errors (SSH) take precedence
-    sorted_errors = sorted(
-        all_errors,
-        key=lambda e: ERROR_PRIORITY.get(e.get("error_type", "UnexpectedError"), 99)
-    )
-    
-    return sorted_errors[0]
 
 
 def determine_method(snmp_data: Optional[SNMPData], ssh_data: Optional[SSHData]) -> Optional[str]:
@@ -159,10 +126,9 @@ def build_detection_result(
     ssh_verification_attempted: bool,
     ssh_verification_success: Optional[bool],
     verification_notes: Optional[str],
-    warnings: List[str],
-    all_errors: List[Dict[str, Any]],
+    error_records: List[ErrorRecord],
     start_time: datetime,
-    phase_timings: Dict[str, float]
+    phase_timings: dict
 ) -> DetectionResult:
     """
     Build complete DetectionResult for detect operation.
@@ -177,8 +143,7 @@ def build_detection_result(
         ssh_verification_attempted: Whether SSH verification was attempted
         ssh_verification_success: Whether SSH verification succeeded
         verification_notes: Notes about verification
-        warnings: List of warning messages
-        all_errors: List of all errors encountered
+        error_records: List of ErrorRecord objects
         start_time: Operation start time
         phase_timings: Dictionary of phase timings
         
@@ -197,9 +162,6 @@ def build_detection_result(
     
     # Determine method
     method = determine_method(snmp_data, ssh_data)
-    
-    # Select primary error
-    primary_error = select_primary_error(all_errors) if all_errors else None
     
     # Determine success
     success = final_result is not None
@@ -223,11 +185,7 @@ def build_detection_result(
         ssh_verification_attempted=ssh_verification_attempted,
         ssh_verification_success=ssh_verification_success,
         verification_notes=verification_notes,
-        error=primary_error["error"] if primary_error else None,
-        error_type=primary_error["error_type"] if primary_error else None,
-        error_details=primary_error["error_details"] if primary_error else None,
-        all_errors=all_errors if all_errors else None,
-        warnings=warnings if warnings else None,
+        error_records=error_records,
         **framework_mappings
     )
 
@@ -236,10 +194,9 @@ def build_collection_result(
     hostname: str,
     snmp_data: Optional[SNMPData],
     ssh_data: Optional[SSHData],
-    warnings: List[str],
-    all_errors: List[Dict[str, Any]],
+    error_records: List[ErrorRecord],
     start_time: datetime,
-    phase_timings: Dict[str, float]
+    phase_timings: dict
 ) -> DetectionResult:
     """
     Build DetectionResult for collect operation.
@@ -248,8 +205,7 @@ def build_collection_result(
         hostname: Target hostname
         snmp_data: Collected SNMP data
         ssh_data: Collected SSH data
-        warnings: List of warning messages
-        all_errors: List of all errors encountered
+        error_records: List of ErrorRecord objects
         start_time: Operation start time
         phase_timings: Dictionary of phase timings
         
@@ -266,9 +222,6 @@ def build_collection_result(
     # Determine method
     method = determine_method(snmp_data, ssh_data)
     
-    # Select primary error
-    primary_error = select_primary_error(all_errors) if all_errors else None
-    
     return DetectionResult(
         hostname=hostname,
         operation_mode="collect",
@@ -282,9 +235,5 @@ def build_collection_result(
             total_seconds=total_seconds,
             phase_timings=phase_timings
         ),
-        error=primary_error["error"] if primary_error else None,
-        error_type=primary_error["error_type"] if primary_error else None,
-        error_details=primary_error["error_details"] if primary_error else None,
-        all_errors=all_errors if all_errors else None,
-        warnings=warnings if warnings else None
+        error_records=error_records
     )

@@ -5,7 +5,9 @@ Handles data collection without device type detection.
 
 import logging
 import time
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
+
+from device_detect.models import ErrorRecord
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +27,8 @@ class CollectionOperation:
             device_detect_instance: Reference to parent DeviceDetect instance
         """
         self.device = device_detect_instance
-        self.all_errors: List[Dict[str, Any]] = []
-        self.phase_timings: Dict[str, float] = {}
+        self.error_records: List[ErrorRecord] = []
+        self.phase_timings: dict = {}
     
     def execute(
         self,
@@ -47,7 +49,7 @@ class CollectionOperation:
             sanitize_output: Remove escape characters from command outputs
             
         Returns:
-            Tuple of (all_errors, phase_timings)
+            Tuple of (error_records, phase_timings)
         """
         logger.info(f"Starting data collection for {self.device.hostname}")
         
@@ -63,7 +65,7 @@ class CollectionOperation:
                 sanitize_output
             )
         
-        return self.all_errors, self.phase_timings
+        return self.error_records, self.phase_timings
     
     def _collect_snmp_data(self) -> None:
         """Collect SNMP data without detection."""
@@ -75,14 +77,12 @@ class CollectionOperation:
         if snmp_result.success:
             self.device.snmp_data = snmp_result.snmp_data
         else:
-            self.all_errors.append({
-                "method": "snmp",
-                "error": snmp_result.error,
-                "error_type": snmp_result.error_type,
-                "error_details": snmp_result.error_details
-            })
-            logger.warning(f"SNMP collection failed: {snmp_result.error}")
-            self.device.warnings.append(f"SNMP collection failed: {snmp_result.error}")
+            # Add error record if present
+            if snmp_result.error_record:
+                self.error_records.append(snmp_result.error_record)
+                logger.warning(f"SNMP collection failed: {snmp_result.error_record.message}")
+            else:
+                logger.warning("SNMP collection failed: Unknown error")
     
     def _collect_ssh_data(
         self,
@@ -111,11 +111,9 @@ class CollectionOperation:
         if ssh_result.success:
             self.device.ssh_data = ssh_result.ssh_data
         else:
-            self.all_errors.append({
-                "method": "ssh",
-                "error": ssh_result.error,
-                "error_type": ssh_result.error_type,
-                "error_details": ssh_result.error_details
-            })
-            logger.warning(f"SSH collection failed: {ssh_result.error}")
-            self.device.warnings.append(f"SSH collection failed: {ssh_result.error}")
+            # Add error record if present
+            if ssh_result.error_record:
+                self.error_records.append(ssh_result.error_record)
+                logger.warning(f"SSH collection failed: {ssh_result.error_record.message}")
+            else:
+                logger.warning("SSH collection failed: Unknown error")

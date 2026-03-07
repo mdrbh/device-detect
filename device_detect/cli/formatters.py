@@ -45,19 +45,27 @@ def format_table(results: List[DetectionResult]) -> str:
     
     table_output = tabulate(rows, headers=headers, tablefmt="grid")
     
-    # Add errors and warnings section if present
+    # Add errors and warnings section if error_records present
     errors_warnings = []
     for result in results:
-        if result.error or result.warnings:
+        if result.has_errors or result.has_warnings:
             errors_warnings.append(f"\n{result.hostname}:")
-            if result.error:
-                errors_warnings.append(f"  ERROR [{result.error_type or 'Unknown'}]: {result.error}")
-                if result.error_details:
-                    for key, value in result.error_details.items():
-                        errors_warnings.append(f"    - {key}: {value}")
-            if result.warnings:
-                for warning in result.warnings:
-                    errors_warnings.append(f"  WARNING: {warning}")
+            
+            # Display errors
+            if result.has_errors:
+                for record in result.errors:
+                    errors_warnings.append(f"  ERROR [{record.error_type}] ({record.phase}): {record.message}")
+                    if record.context:
+                        for key, value in record.context.items():
+                            errors_warnings.append(f"    - {key}: {value}")
+            
+            # Display warnings
+            if result.has_warnings:
+                for record in result.warnings:
+                    errors_warnings.append(f"  WARNING ({record.phase}): {record.message}")
+                    if record.context:
+                        for key, value in record.context.items():
+                            errors_warnings.append(f"    - {key}: {value}")
     
     if errors_warnings:
         table_output += "\n\n" + "=" * 80 + "\nERRORS & WARNINGS\n" + "=" * 80
@@ -86,15 +94,22 @@ def format_csv(results: List[DetectionResult], delimiter: str = ";") -> str:
     # Header
     writer.writerow([
         "hostname", "operation_mode", "method", "success", "device_type", "score",
-        "total_seconds", "error", "error_type", "warnings",
+        "total_seconds", "error", "error_type", "error_phase", "warnings",
         "snmp_sys_descr", "snmp_sys_object_id", "snmp_sys_name",
         "ssh_version", "ssh_banner", "ssh_prompt"
     ])
     
     # Data rows
     for result in results:
+        # Get primary error if present
+        primary_error = result.primary_error
+        error_msg = primary_error.message if primary_error else ""
+        error_type = primary_error.error_type if primary_error else ""
+        error_phase = primary_error.phase if primary_error else ""
+        
         # Format warnings as semicolon-separated string
-        warnings_str = "; ".join(result.warnings) if result.warnings else ""
+        warnings_list = [w.message for w in result.warnings] if result.has_warnings else []
+        warnings_str = "; ".join(warnings_list)
         
         writer.writerow([
             result.hostname,
@@ -104,8 +119,9 @@ def format_csv(results: List[DetectionResult], delimiter: str = ";") -> str:
             result.device_type or "",
             result.score,
             result.timing.total_seconds if result.timing else "",
-            result.error or "",
-            result.error_type or "",
+            error_msg,
+            error_type,
+            error_phase,
             warnings_str,
             result.snmp_data.sys_descr if result.snmp_data else "",
             result.snmp_data.sys_object_id if result.snmp_data else "",
@@ -138,16 +154,19 @@ def format_excel(results: List[DetectionResult], output_file: str) -> None:
             "total_seconds": result.timing.total_seconds if result.timing else None,
         }
         
-        # Error information
-        if result.error:
-            row["error"] = result.error
-            row["error_type"] = result.error_type
-            if result.error_details:
-                row["error_details"] = str(result.error_details)
+        # Error information from primary_error
+        primary_error = result.primary_error
+        if primary_error:
+            row["error"] = primary_error.message
+            row["error_type"] = primary_error.error_type
+            row["error_phase"] = primary_error.phase
+            if primary_error.context:
+                row["error_context"] = str(primary_error.context)
         
         # Warnings
-        if result.warnings:
-            row["warnings"] = "; ".join(result.warnings)
+        if result.has_warnings:
+            warnings_list = [w.message for w in result.warnings]
+            row["warnings"] = "; ".join(warnings_list)
         
         # SNMP data
         if result.snmp_data:

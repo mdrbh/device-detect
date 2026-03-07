@@ -80,7 +80,7 @@ device-detect list-patterns
 
 ## Credits
 
-This project is based on the device autodetection logic from [Netmiko](https://github.com/ktbyers/netmiko) by Kirk Byers. The original code has been refactored, modularized, and extended with SNMP detection capabilities.
+This project is based on the device autodetection logic from [Netmiko](https://github.com/ktbyers/netmiko) by Kirk Byers. The original code has been refactored, modularized, and extended with comprehensive error handling capabilities.
 
 ## License
 

@@ -5,10 +5,10 @@ Handles the complete detection flow including SNMP, SSH verification, and SSH de
 
 import logging
 import time
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from datetime import datetime
 
-from device_detect.models import MethodResult
+from device_detect.models import MethodResult, ErrorRecord
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +31,15 @@ class DetectionOperation:
         self.snmp_result: Optional[str] = None
         self.ssh_result: Optional[str] = None
         self.final_result: Optional[str] = None
-        self.all_errors: List[Dict[str, Any]] = []
-        self.phase_timings: Dict[str, float] = {}
+        self.error_records: List[ErrorRecord] = []
+        self.phase_timings: dict = {}
         
     def execute(self) -> tuple:
         """
         Execute the complete detection workflow.
         
         Returns:
-            Tuple of (final_result, snmp_result, ssh_result, all_errors, phase_timings)
+            Tuple of (final_result, snmp_result, ssh_result, error_records, phase_timings)
         """
         logger.info(f"Starting device detection for {self.device.hostname}")
         
@@ -66,7 +66,7 @@ class DetectionOperation:
             self.final_result,
             self.snmp_result,
             self.ssh_result,
-            self.all_errors,
+            self.error_records,
             self.phase_timings
         )
     
@@ -82,14 +82,12 @@ class DetectionOperation:
             self.device.snmp_data = snmp_result.snmp_data
             logger.info(f"SNMP detected: {self.snmp_result}")
         else:
-            self.all_errors.append({
-                "method": "snmp",
-                "error": snmp_result.error,
-                "error_type": snmp_result.error_type,
-                "error_details": snmp_result.error_details
-            })
-            logger.warning(f"SNMP detection failed: {snmp_result.error}")
-            self.device.warnings.append(f"SNMP detection failed: {snmp_result.error}")
+            # Add error record if present
+            if snmp_result.error_record:
+                self.error_records.append(snmp_result.error_record)
+                logger.warning(f"SNMP detection failed: {snmp_result.error_record.message}")
+            else:
+                logger.warning("SNMP detection failed: Unknown error")
     
     def _run_ssh_verification_phase(self, device_type: str) -> tuple:
         """
@@ -131,14 +129,12 @@ class DetectionOperation:
                 logger.info(f"SSH fallback detected: {ssh_result.device_type}")
                 return False, ssh_result.device_type
             else:
-                self.all_errors.append({
-                    "method": "ssh",
-                    "error": ssh_result.error,
-                    "error_type": ssh_result.error_type,
-                    "error_details": ssh_result.error_details
-                })
-                logger.warning(f"SSH fallback detection failed: {ssh_result.error}")
-                self.device.warnings.append(f"SSH detection failed: {ssh_result.error}")
+                # Add error record if present
+                if ssh_result.error_record:
+                    self.error_records.append(ssh_result.error_record)
+                    logger.warning(f"SSH fallback detection failed: {ssh_result.error_record.message}")
+                else:
+                    logger.warning("SSH fallback detection failed: Unknown error")
                 return False, None
     
     def _run_ssh_detection_phase(self) -> None:
@@ -155,14 +151,12 @@ class DetectionOperation:
             self.device.ssh_data = ssh_result.ssh_data
             logger.info(f"SSH detected: {self.ssh_result}")
         else:
-            self.all_errors.append({
-                "method": "ssh",
-                "error": ssh_result.error,
-                "error_type": ssh_result.error_type,
-                "error_details": ssh_result.error_details
-            })
-            logger.warning(f"SSH detection failed: {ssh_result.error}")
-            self.device.warnings.append(f"SSH detection failed: {ssh_result.error}")
+            # Add error record if present
+            if ssh_result.error_record:
+                self.error_records.append(ssh_result.error_record)
+                logger.warning(f"SSH detection failed: {ssh_result.error_record.message}")
+            else:
+                logger.warning("SSH detection failed: Unknown error")
     
     def _resolve_final_result(self) -> Optional[str]:
         """
