@@ -117,7 +117,8 @@ class DetectionOperation:
             logger.warning(f"SSH verification failed for {device_type}, falling back to full SSH detection")
             self.device.ssh_verification_success = False
             self.device.verification_notes = f"SSH verification failed for SNMP-detected {device_type}, performed full SSH autodetection"
-            self.device.warnings.append(f"SSH verification failed for {device_type}: {verify_result.error}")
+            error_msg = verify_result.error_record.message if verify_result.error_record else "Unknown error"
+            self.device.warnings.append(f"SSH verification failed for {device_type}: {error_msg}")
             
             # Fall back to full SSH detection
             fallback_start = time.time()

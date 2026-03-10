@@ -123,12 +123,12 @@ def format_csv(results: List[DetectionResult], delimiter: str = ";") -> str:
             error_type,
             error_phase,
             warnings_str,
-            result.snmp_data.sys_descr if result.snmp_data else "",
-            result.snmp_data.sys_object_id if result.snmp_data else "",
-            result.snmp_data.sys_name if result.snmp_data else "",
-            result.ssh_data.ssh_version if result.ssh_data else "",
-            result.ssh_data.banner if result.ssh_data else "",
-            result.ssh_data.prompt if result.ssh_data else ""
+            result.snmp_data.sys_descr if result.snmp_data and hasattr(result.snmp_data, 'sys_descr') else "",
+            result.snmp_data.sys_object_id if result.snmp_data and hasattr(result.snmp_data, 'sys_object_id') else "",
+            result.snmp_data.sys_name if result.snmp_data and hasattr(result.snmp_data, 'sys_name') else "",
+            result.ssh_data.ssh_version if result.ssh_data and hasattr(result.ssh_data, 'ssh_version') else "",
+            result.ssh_data.banner if result.ssh_data and hasattr(result.ssh_data, 'banner') else "",
+            result.ssh_data.prompt if result.ssh_data and hasattr(result.ssh_data, 'prompt') else ""
         ])
     
     return output.getvalue()
@@ -170,17 +170,24 @@ def format_excel(results: List[DetectionResult], output_file: str) -> None:
         
         # SNMP data
         if result.snmp_data:
-            row["snmp_sys_descr"] = result.snmp_data.sys_descr
-            row["snmp_sys_object_id"] = result.snmp_data.sys_object_id
-            row["snmp_sys_uptime"] = result.snmp_data.sys_uptime
-            row["snmp_sys_name"] = result.snmp_data.sys_name
+            if hasattr(result.snmp_data, 'sys_descr'):
+                row["snmp_sys_descr"] = result.snmp_data.sys_descr
+            if hasattr(result.snmp_data, 'sys_object_id'):
+                row["snmp_sys_object_id"] = result.snmp_data.sys_object_id
+            if hasattr(result.snmp_data, 'sys_uptime'):
+                row["snmp_sys_uptime"] = result.snmp_data.sys_uptime
+            if hasattr(result.snmp_data, 'sys_name'):
+                row["snmp_sys_name"] = result.snmp_data.sys_name
         
         # SSH data
         if result.ssh_data:
-            row["ssh_version"] = result.ssh_data.ssh_version
-            row["ssh_banner"] = result.ssh_data.banner
-            row["ssh_prompt"] = result.ssh_data.prompt
-            row["ssh_banner_length"] = len(result.ssh_data.banner) if result.ssh_data.banner else 0
+            if hasattr(result.ssh_data, 'ssh_version'):
+                row["ssh_version"] = result.ssh_data.ssh_version
+            if hasattr(result.ssh_data, 'banner'):
+                row["ssh_banner"] = result.ssh_data.banner
+            if hasattr(result.ssh_data, 'prompt'):
+                row["ssh_prompt"] = result.ssh_data.prompt
+                row["ssh_banner_length"] = len(result.ssh_data.banner) if result.ssh_data.banner else 0
         
         data.append(row)
     

@@ -435,7 +435,7 @@ class DeviceDetect:
         return result
     
     def collect(self, snmp_only: bool = False, ssh_only: bool = False,
-                collect_ssh_commands: bool = False, 
+                collect_ssh_commands: bool = True, 
                 additional_commands: Optional[list] = None,
                 sanitize_output: bool = False) -> DetectionResult:
         """
@@ -444,7 +444,7 @@ class DeviceDetect:
         Args:
             snmp_only: Only collect SNMP data
             ssh_only: Only collect SSH data
-            collect_ssh_commands: Collect all SSH detection commands outputs
+            collect_ssh_commands: Collect all SSH detection commands outputs (default: True)
             additional_commands: List of additional commands to collect (deduplicated)
             sanitize_output: Remove escape characters and control codes from command outputs
             
