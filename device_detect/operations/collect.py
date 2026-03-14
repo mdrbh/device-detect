@@ -51,7 +51,7 @@ class CollectionOperation:
         Returns:
             Tuple of (error_records, phase_timings)
         """
-        logger.info(f"Starting data collection for {self.device.hostname}")
+        logger.debug(f"Data collection for {self.device.hostname}")
         
         # Collect SNMP data
         if not ssh_only and self.device._has_snmp_credentials():
@@ -69,7 +69,7 @@ class CollectionOperation:
     
     def _collect_snmp_data(self) -> None:
         """Collect SNMP data without detection."""
-        logger.info("Collecting SNMP data")
+        logger.debug("SNMP data collection")
         phase_start = time.time()
         snmp_result = self.device._try_snmp_detection(detect_device_type=False)
         self.phase_timings["snmp_collect"] = time.time() - phase_start
@@ -98,7 +98,7 @@ class CollectionOperation:
             additional_commands: List of additional commands to collect
             sanitize_output: Remove escape characters from command outputs
         """
-        logger.info("Collecting SSH data")
+        logger.debug("SSH data collection")
         phase_start = time.time()
         ssh_result = self.device._try_ssh_detection(
             detect_device_type=False,

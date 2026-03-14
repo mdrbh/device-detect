@@ -160,10 +160,10 @@ class DetectionResult:
         ssh_verification_attempted: Whether SSH verification of SNMP result was attempted
         ssh_verification_success: Whether SSH verification succeeded (None if not attempted)
         verification_notes: Notes about verification process (errors, edge cases)
-        scrapli_driver: Scrapli driver name for the detected device type
+        scrapli_platform: Scrapli platform name for the detected device type
         napalm_driver: NAPALM driver name for the detected device type
-        nornir_driver: Nornir driver name for the detected device type
-        ansible_driver: Ansible network_os for the detected device type
+        nornir_platform: Nornir platform name for the detected device type
+        ansible_network_os: Ansible network_os for the detected device type
         error_records: List of ErrorRecord objects (errors and warnings)
     """
     hostname: str
@@ -178,10 +178,10 @@ class DetectionResult:
     ssh_verification_attempted: bool = False
     ssh_verification_success: Optional[bool] = None
     verification_notes: Optional[str] = None
-    scrapli_driver: Optional[str] = None
+    scrapli_platform: Optional[str] = None
     napalm_driver: Optional[str] = None
-    nornir_driver: Optional[str] = None
-    ansible_driver: Optional[str] = None
+    nornir_platform: Optional[str] = None
+    ansible_network_os: Optional[str] = None
     error_records: List[ErrorRecord] = field(default_factory=list)
     
     @property
@@ -251,10 +251,10 @@ class DetectionResult:
             ssh_verification_attempted=data.get('ssh_verification_attempted', False),
             ssh_verification_success=data.get('ssh_verification_success'),
             verification_notes=data.get('verification_notes'),
-            scrapli_driver=data.get('scrapli_driver'),
+            scrapli_platform=data.get('scrapli_platform'),
             napalm_driver=data.get('napalm_driver'),
-            nornir_driver=data.get('nornir_driver'),
-            ansible_driver=data.get('ansible_driver'),
+            nornir_platform=data.get('nornir_platform'),
+            ansible_network_os=data.get('ansible_network_os'),
             error_records=error_records
         )
     

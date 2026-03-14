@@ -96,7 +96,7 @@ class SNMPDetector:
             priv_password=priv_password,
         )
         
-        logger.info(f"SNMP detector initialized for {hostname} (v{version})")
+        logger.debug(f"SNMP detector initialized for {hostname} (v{version})")
     
     def autodetect(self) -> Optional[str]:
         """
@@ -107,7 +107,7 @@ class SNMPDetector:
         Returns:
             device_type string if detected, None if no match or SNMP fails
         """
-        logger.info(f"Starting SNMP autodetection for {self.hostname}")
+        logger.debug(f"SNMP autodetection for {self.hostname}")
         
         try:
             # Get sysDescr via SNMP

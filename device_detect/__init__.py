@@ -29,7 +29,7 @@ from device_detect.operations.offline import (
     calculate_offline_score
 )
 
-__version__ = "0.11.1"
+__version__ = "0.13.0"
 __all__ = [
     "DeviceDetect",
     "DetectionResult",

@@ -349,7 +349,7 @@ class DeviceDetect:
             raise ValueError("Data missing required field: 'hostname'")
         
         hostname = data['hostname']
-        logger.info(f"Starting offline detection from dictionary for {hostname}")
+        logger.debug(f"Offline detection from dictionary for {hostname}")
         
         start_time = datetime.now()
         
@@ -363,22 +363,22 @@ class DeviceDetect:
         ssh_result = None
         
         if snmp_data:
-            logger.info(f"Running SNMP pattern matching for {hostname}")
+            logger.debug(f"SNMP pattern matching for {hostname}")
             snmp_result, _ = detect_from_snmp_data(snmp_data)
             if snmp_result:
-                logger.info(f"SNMP pattern matched: {snmp_result}")
+                logger.debug(f"SNMP pattern matched: {snmp_result}")
         
         if ssh_data:
-            logger.info(f"Running SSH pattern matching for {hostname}")
+            logger.debug(f"SSH pattern matching for {hostname}")
             ssh_result, _ = detect_from_ssh_data(ssh_data)
             if ssh_result:
-                logger.info(f"SSH pattern matched: {ssh_result}")
+                logger.debug(f"SSH pattern matched: {ssh_result}")
         
         # Determine final result
         final_result = None
         if snmp_result and ssh_result:
             if snmp_result == ssh_result:
-                logger.info("SNMP and SSH patterns agree")
+                logger.debug("SNMP and SSH patterns agree")
                 final_result = snmp_result
             else:
                 logger.warning(f"Pattern mismatch: SNMP={snmp_result}, SSH={ssh_result}")
@@ -785,18 +785,18 @@ class DeviceDetect:
         """
         if not device_type:
             return {
-                'scrapli_driver': None,
+                'scrapli_platform': None,
                 'napalm_driver': None,
-                'nornir_driver': None,
-                'ansible_driver': None
+                'nornir_platform': None,
+                'ansible_network_os': None
             }
         
         mappings = get_framework_drivers(device_type)
         return {
-            'scrapli_driver': mappings.get('scrapli'),
+            'scrapli_platform': mappings.get('scrapli'),
             'napalm_driver': mappings.get('napalm'),
-            'nornir_driver': mappings.get('nornir'),
-            'ansible_driver': mappings.get('ansible')
+            'nornir_platform': mappings.get('nornir'),
+            'ansible_network_os': mappings.get('ansible')
         }
     
     @staticmethod
@@ -817,7 +817,7 @@ class DeviceDetect:
             FileNotFoundError: If JSON file doesn't exist
             ValueError: If JSON is invalid or missing required fields
         """
-        logger.info(f"Starting offline detection from {json_file_path}")
+        logger.debug(f"Offline detection from {json_file_path}")
         
         start_time = datetime.now()
         
@@ -835,22 +835,22 @@ class DeviceDetect:
         ssh_result = None
         
         if snmp_data:
-            logger.info("Running SNMP pattern matching on collected data")
+            logger.debug("SNMP pattern matching")
             snmp_result, _ = detect_from_snmp_data(snmp_data)
             if snmp_result:
-                logger.info(f"SNMP pattern matched: {snmp_result}")
+                logger.debug(f"SNMP pattern matched: {snmp_result}")
         
         if ssh_data:
-            logger.info("Running SSH pattern matching on collected data")
+            logger.debug("SSH pattern matching")
             ssh_result, _ = detect_from_ssh_data(ssh_data)
             if ssh_result:
-                logger.info(f"SSH pattern matched: {ssh_result}")
+                logger.debug(f"SSH pattern matched: {ssh_result}")
         
         # Determine final result
         final_result = None
         if snmp_result and ssh_result:
             if snmp_result == ssh_result:
-                logger.info("SNMP and SSH patterns agree")
+                logger.debug("SNMP and SSH patterns agree")
                 final_result = snmp_result
             else:
                 logger.warning(f"Pattern mismatch: SNMP={snmp_result}, SSH={ssh_result}")

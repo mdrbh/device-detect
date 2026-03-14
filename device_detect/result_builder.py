@@ -101,18 +101,18 @@ def get_framework_mappings(device_type: Optional[str]) -> dict:
     """
     if not device_type:
         return {
-            'scrapli_driver': None,
+            'scrapli_platform': None,
             'napalm_driver': None,
-            'nornir_driver': None,
-            'ansible_driver': None
+            'nornir_platform': None,
+            'ansible_network_os': None
         }
     
     mappings = get_framework_drivers(device_type)
     return {
-        'scrapli_driver': mappings.get('scrapli'),
+        'scrapli_platform': mappings.get('scrapli'),
         'napalm_driver': mappings.get('napalm'),
-        'nornir_driver': mappings.get('nornir'),
-        'ansible_driver': mappings.get('ansible')
+        'nornir_platform': mappings.get('nornir'),
+        'ansible_network_os': mappings.get('ansible')
     }
 
 

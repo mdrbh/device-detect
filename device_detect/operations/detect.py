@@ -72,7 +72,7 @@ class DetectionOperation:
     
     def _run_snmp_phase(self) -> None:
         """Execute SNMP detection phase."""
-        logger.info("Phase 1: Attempting SNMP detection")
+        logger.debug("Phase 1: SNMP detection")
         phase_start = time.time()
         snmp_result = self.device._try_snmp_detection()
         self.phase_timings["snmp_detect"] = time.time() - phase_start
@@ -99,7 +99,7 @@ class DetectionOperation:
         Returns:
             Tuple of (verified, fallback_ssh_result)
         """
-        logger.info(f"Phase 2: Attempting SSH verification of SNMP result ({device_type})")
+        logger.debug(f"Phase 2: SSH verification of SNMP result ({device_type})")
         ssh_phase_start = time.time()
         self.device.ssh_verification_attempted = True
         
@@ -108,7 +108,7 @@ class DetectionOperation:
         self.phase_timings["ssh_verify"] = ssh_elapsed
         
         if verify_result.success and verify_result.device_type:
-            logger.info(f"SSH verification succeeded for {device_type}")
+            logger.debug(f"SSH verification succeeded for {device_type}")
             self.device.ssh_verification_success = True
             self.ssh_result = device_type
             self.device.ssh_data = verify_result.ssh_data
@@ -140,7 +140,7 @@ class DetectionOperation:
     
     def _run_ssh_detection_phase(self) -> None:
         """Execute normal SSH detection phase."""
-        logger.info("Phase 2: Attempting SSH detection")
+        logger.debug("Phase 2: SSH detection")
         ssh_phase_start = time.time()
         ssh_result = self.device._try_ssh_detection()
         ssh_elapsed = time.time() - ssh_phase_start
@@ -168,7 +168,7 @@ class DetectionOperation:
         """
         if self.snmp_result and self.ssh_result:
             if self.snmp_result == self.ssh_result:
-                logger.info("SNMP and SSH agree on device type")
+                logger.debug("SNMP and SSH agree on device type")
                 return self.snmp_result
             else:
                 logger.warning(f"Detection conflict: SNMP={self.snmp_result}, SSH={self.ssh_result}")

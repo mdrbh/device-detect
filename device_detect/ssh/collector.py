@@ -42,7 +42,7 @@ class SSHCollector:
         Returns:
             Dict[str, str]: Mapping of {command: output}
         """
-        logger.info("Collecting SSH detection commands outputs")
+        logger.debug("Collecting SSH detection commands")
         
         # Extract all unique commands from SSH_MAPPER_DICT
         unique_commands = set()
@@ -60,7 +60,7 @@ class SSHCollector:
         # Remove empty commands
         unique_commands.discard("")
         
-        logger.info(f"Found {len(unique_commands)} unique detection commands")
+        logger.debug(f"Found {len(unique_commands)} unique detection commands")
         
         # Execute each command and collect output
         command_outputs = {}
@@ -76,7 +76,7 @@ class SSHCollector:
                 logger.warning(f"Failed to collect command '{cmd}': {e}")
                 command_outputs[cmd] = f"ERROR: {str(e)}"
         
-        logger.info(f"Successfully collected {len(command_outputs)} command outputs")
+        logger.debug(f"Collected {len(command_outputs)} command outputs")
         return command_outputs
     
     def collect_additional_commands(self, commands: List[str], sanitize: bool = False) -> Dict[str, str]:
@@ -96,7 +96,7 @@ class SSHCollector:
         if not commands:
             return {}
         
-        logger.info(f"Processing {len(commands)} additional commands")
+        logger.debug(f"Processing {len(commands)} additional commands")
         
         # Get detection commands for deduplication
         detection_commands = set()
@@ -119,13 +119,13 @@ class SSHCollector:
                 filtered_commands.append(cmd)
         
         if duplicates:
-            logger.info(f"Skipped {len(duplicates)} duplicate commands already in detection list")
+            logger.debug(f"Skipped {len(duplicates)} duplicate commands")
         
         if not filtered_commands:
-            logger.info("No additional commands to collect after deduplication")
+            logger.debug("No additional commands after deduplication")
             return {}
         
-        logger.info(f"Collecting {len(filtered_commands)} additional commands")
+        logger.debug(f"Collecting {len(filtered_commands)} additional commands")
         
         # Execute each command and collect output
         command_outputs = {}
@@ -141,7 +141,7 @@ class SSHCollector:
                 logger.warning(f"Failed to collect additional command '{cmd}': {e}")
                 command_outputs[cmd] = f"ERROR: {str(e)}"
         
-        logger.info(f"Successfully collected {len(command_outputs)} additional command outputs")
+        logger.debug(f"Collected {len(command_outputs)} additional command outputs")
         return command_outputs
     
     def get_ssh_data(

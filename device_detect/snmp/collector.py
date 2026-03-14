@@ -102,7 +102,7 @@ async def collect_snmp_data(
         
         # Check for empty sysDescr (edge case)
         if not snmp_data.sys_descr or snmp_data.sys_descr.strip() == "":
-            logger.warning(f"[{hostname}] Empty sysDescr received from device")
+            logger.debug(f"[{hostname}] Empty sysDescr received from device")
             # Return data anyway, but log warning
         
         logger.debug(f"[{hostname}] SNMP data collected successfully")

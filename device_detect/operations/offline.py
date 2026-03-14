@@ -90,10 +90,10 @@ def detect_offline_from_dict(data: dict) -> DetectionResult:
     if final_result:
         mappings = get_framework_drivers(final_result)
         framework_mappings = {
-            'scrapli_driver': mappings.get('scrapli'),
+            'scrapli_platform': mappings.get('scrapli'),
             'napalm_driver': mappings.get('napalm'),
-            'nornir_driver': mappings.get('nornir'),
-            'ansible_driver': mappings.get('ansible')
+            'nornir_platform': mappings.get('nornir'),
+            'ansible_network_os': mappings.get('ansible')
         }
     
     # Calculate timing

@@ -80,7 +80,7 @@ class SSHClient:
         """
         self.timings = timings
         
-        logger.info(f"Establishing SSH connection to {kwargs.get('host', 'unknown')}")
+        logger.debug(f"SSH connection to {kwargs.get('host', 'unknown')}")
         
         try:
             self.connection = ConnectHandler(*args, **kwargs)
@@ -282,7 +282,7 @@ def create_ssh_connection(
         Tuple of (SSHClient or None, ErrorRecord or None)
     """
     try:
-        logger.info(f"[{hostname}] Attempting SSH connection")
+        logger.debug(f"[{hostname}] SSH connection attempt")
         ssh_client = SSHClient(timings, *args, **kwargs)
         
         # Check for edge cases
@@ -294,7 +294,7 @@ def create_ssh_connection(
             logger.warning(f"[{hostname}] Empty initial buffer after connection")
             # This is unusual but not necessarily an error
         
-        logger.info(f"[{hostname}] SSH connection established successfully")
+        logger.debug(f"[{hostname}] SSH connection established")
         return ssh_client, None
         
     except (NetmikoAuthenticationException, ParamikoAuthException) as e:

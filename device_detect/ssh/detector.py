@@ -72,7 +72,7 @@ class SSHDetector:
         # Apply timing profile
         self.timing_profile = timing_profile
         self.timings = SSH_TIMING_PROFILES[timing_profile]
-        logger.info(f"Using SSH timing profile: {timing_profile}")
+        logger.debug(f"SSH timing profile: {timing_profile}")
         
         # Adaptive retry configuration
         self.adaptive_retry_enabled = SSH_ADAPTIVE_RETRY_ENABLED
@@ -120,7 +120,7 @@ class SSHDetector:
         Returns:
             Tuple of (success, priority) - success is True if device matches, priority is confidence level
         """
-        logger.info(f"Starting SSH verification for device type: {device_type}")
+        logger.debug(f"SSH verification for device type: {device_type}")
         
         if device_type not in SSH_MAPPER_DICT:
             logger.warning(f"Device type '{device_type}' not found in SSH patterns")
@@ -155,40 +155,40 @@ class SSHDetector:
         Returns:
             device_type string if detected, None if no match found
         """
-        logger.info("Starting SSH autodetection")
+        logger.debug("SSH autodetection")
         
         # Check if SSH version filtering is enabled
         if self.ssh_version_filter and self.ssh_version:
-            logger.info(f"SSH version filtering enabled. Detected version: {self.ssh_version}")
+            logger.debug(f"SSH version filtering enabled, version: {self.ssh_version}")
             
             # Get device types split by SSH version match
             matching_types, non_matching_types = self._split_device_types_by_ssh_version()
             
             # Phase 1: Test device types matching SSH version
             if matching_types:
-                logger.info(f"Phase 1: Testing {len(matching_types)} device types matching SSH version")
+                logger.debug(f"Phase 1: {len(matching_types)} device types match SSH version")
                 ssh_mapper_phase1 = get_ssh_mapper_base(device_types=matching_types)
                 
                 result = self._test_device_types(ssh_mapper_phase1, phase="1")
                 if result:
                     return result
             else:
-                logger.info("Phase 1: No device types match SSH version patterns")
+                logger.debug("Phase 1: No device types match SSH version")
             
             # Phase 2: Fallback to non-matching device types if enabled
             if self.fallback and non_matching_types:
-                logger.info(f"Phase 2 (fallback): Testing {len(non_matching_types)} remaining device types")
+                logger.debug(f"Phase 2: {len(non_matching_types)} remaining device types")
                 ssh_mapper_phase2 = get_ssh_mapper_base(device_types=non_matching_types)
                 
                 result = self._test_device_types(ssh_mapper_phase2, phase="2")
                 if result:
                     return result
             elif not self.fallback:
-                logger.info("Phase 2: Fallback disabled, skipping non-matching device types")
+                logger.debug("Phase 2: Fallback disabled")
         else:
             # SSH version filtering disabled or no SSH version detected
             if not self.ssh_version_filter:
-                logger.info("SSH version filtering disabled")
+                logger.debug("SSH version filtering disabled")
             else:
                 logger.warning("SSH version not detected, proceeding with all device types")
             
