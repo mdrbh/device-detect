@@ -5,6 +5,7 @@ Helper functions and utilities for device detection.
 import functools
 import logging
 import signal
+import sys
 from typing import Any, Callable, Optional
 
 from device_detect.exceptions import TimeoutError
@@ -79,7 +80,7 @@ def validate_snmp_version(version: int) -> bool:
 
 def setup_logging(log_level: str = "INFO") -> None:
     """
-    Setup logging configuration.
+    Setup logging configuration to stdout.
     
     Args:
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
@@ -91,7 +92,9 @@ def setup_logging(log_level: str = "INFO") -> None:
     logging.basicConfig(
         level=numeric_level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
+        datefmt='%Y-%m-%d %H:%M:%S',
+        stream=sys.stdout,  # Log to stdout instead of stderr
+        force=True  # Override any existing configuration
     )
 
 
